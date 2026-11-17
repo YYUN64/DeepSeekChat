@@ -172,9 +172,10 @@ fun ChoiceRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 3.dp)
             .clip(RoundedCornerShape(12.dp))
             .clickable(enabled = enabled) { onClick() }
-            .padding(horizontal = 4.dp, vertical = 14.dp),
+            .padding(horizontal = 10.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
@@ -207,9 +208,10 @@ fun SwitchRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 3.dp)
             .clip(RoundedCornerShape(12.dp))
             .clickable { onCheckedChange(!checked) }
-            .padding(horizontal = 4.dp, vertical = 12.dp),
+            .padding(horizontal = 10.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {

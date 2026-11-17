@@ -133,9 +133,11 @@ fun SettingsScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            // 先留出与分割线的间距，再裁剪，按压高亮就不会和分割线连在一起
+                            .padding(horizontal = 4.dp, vertical = 3.dp)
                             .clip(RoundedCornerShape(12.dp))
                             .clickable { onChange(settings.copy(model = model)) }
-                            .padding(horizontal = 4.dp, vertical = 8.dp),
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(

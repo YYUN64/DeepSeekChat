@@ -359,9 +359,10 @@ private fun ConversationOptionsDialog(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .padding(horizontal = 4.dp, vertical = 3.dp)
                             .clip(RoundedCornerShape(12.dp))
                             .clickable { onSetModel(item) }
-                            .padding(vertical = 6.dp),
+                            .padding(horizontal = 8.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(selected = model == item, onClick = { onSetModel(item) })
