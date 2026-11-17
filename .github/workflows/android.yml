@@ -54,6 +54,17 @@ jobs:
             exit "$code"
           fi
 
+      - name: Verify fixed release signing
+        run: |
+          # 固定签名：keystore.properties + app/deepseek-lite.jks 都在仓库里，本机/CI 用同一把 key
+          test -f keystore.properties
+          test -f app/deepseek-lite.jks
+          BT="$ANDROID_HOME/build-tools/34.0.0"
+          "$BT/apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk | tee /tmp/certs.txt
+          # 固定证书 SHA-256（20:6C:32:70:...:B4:30），不一致直接失败
+          grep -q "206c32700f8cfd07f45c4f8d3991d9794cf01006a77e8eea8ca1d7386ba4b430" /tmp/certs.txt \
+            || { echo "::error title=Release signing::release APK 证书指纹与固定 keystore 不一致"; exit 1; }
+
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:

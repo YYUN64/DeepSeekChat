@@ -1,20 +1,42 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// 固定发布签名：本机与 CI 共用仓库里的 keystore.properties + app/deepseek-lite.jks，
+// 避免各自用本地 debug.keystore 导致「CI 包覆盖本机包」签名不一致。
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { load(it) }
+}
+val fixedStoreFile = keystoreProps.getProperty("storeFile")?.let { rootProject.file(it) }
+val hasFixedSigning = fixedStoreFile?.exists() == true
+
 android {
     namespace = "com.deepseek.chat"
     compileSdk = 34
+
+    signingConfigs {
+        if (hasFixedSigning) {
+            create("release") {
+                storeFile = fixedStoreFile
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
 
     defaultConfig {
         // 官方 App 的包名就是 com.deepseek.chat，这里必须用不同的 applicationId 才能共存
         applicationId = "io.github.yyun64.deepseekchat"
         minSdk = 26
         targetSdk = 34
-        versionCode = 13
-        versionName = "1.2.8"
+        versionCode = 14
+        versionName = "1.2.9"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -22,8 +44,14 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            // 个人自用：release 也用 debug 签名，方便直接安装
-            signingConfig = signingConfigs.getByName("debug")
+            // 固定签名：本机与 CI 共用仓库里的 keystore，避免两边 debug.keystore 不同导致的签名不一致。
+            // 找不到 keystore 时才回退 debug 签名（会打印提示）。
+            signingConfig = if (hasFixedSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                println("WARNING: keystore.properties 或 app/deepseek-lite.jks 缺失，release 回退 debug 签名（本机与 CI 可能不一致）")
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

@@ -57,7 +57,9 @@
 ./gradlew :app:assembleRelease   # 发布包：app/build/outputs/apk/release/app-release.apk
 ```
 
-> **日常请用 release 包**：开了 R8 压缩/混淆，体积 1.5 MB、冷启动 ~0.36 s；debug 包因为要保留调试信息且不做 AOT，冷启动约 2 s。release 用 debug keystore 签名，可以直接安装（不适合上架分发）。
+> **日常请用 release 包**：开了 R8 压缩/混淆，体积 1.5 MB、冷启动 ~0.36 s；debug 包因为要保留调试信息且不做 AOT，冷启动约 2 s。release 使用仓库内固定的 `app/deepseek-lite.jks`（密码与别名在 `keystore.properties`，随仓库提交）签名，**本机与 CI 产出的包签名完全一致，可以互相覆盖安装**。
+>
+> **签名迁移提醒**：从 1.2.9 起固定了签名。如果你之前装的是从 GitHub Release / CI 下载的包（GitHub runner 用自己机器的 debug keystore 签名），需要**卸载一次**再装新包；卸载会删除本机会话数据（`allowBackup=false`，没有云备份），重要会话请先自行备份。一直装本机构建包的设备可以直接覆盖安装。
 
 首次构建需要能访问 Google Maven / Maven Central（`settings.gradle.kts` 已优先使用阿里云镜像）。`sdk.dir` 由 `local.properties` 指定，Android Studio 会自动生成。
 
