@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -26,6 +27,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -51,6 +53,7 @@ import com.deepseek.chat.data.ThemeMode
 fun SettingsScreen(
     settings: Settings,
     onChange: (Settings) -> Unit,
+    onTestMcp: () -> Unit,
     onBack: () -> Unit
 ) {
     var showKey by remember { mutableStateOf(false) }
@@ -202,6 +205,57 @@ fun SettingsScreen(
                 )
             }
 
+            SettingSection("MCP 服务器") {
+                SwitchRow(
+                    label = "启用 MCP",
+                    description = "把远程 MCP 服务器的工具交给模型调用（需自己部署，streamable HTTP）",
+                    checked = settings.mcpEnabled,
+                    onCheckedChange = { onChange(settings.copy(mcpEnabled = it)) }
+                )
+                if (settings.mcpEnabled) {
+                    SectionDivider()
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = settings.mcpHost,
+                            onValueChange = { onChange(settings.copy(mcpHost = it.trim())) },
+                            label = { Text("服务器 IPv4") },
+                            placeholder = { Text("192.168.1.10") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(vertical = 8.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        OutlinedTextField(
+                            value = settings.mcpPort.toString(),
+                            onValueChange = { text ->
+                                text.filter { it.isDigit() }.take(5).toIntOrNull()
+                                    ?.let { onChange(settings.copy(mcpPort = it)) }
+                            },
+                            label = { Text("端口") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier
+                                .width(96.dp)
+                                .padding(vertical = 8.dp)
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = onTestMcp) { Text("测试连接") }
+                    }
+                    Text(
+                        text = "地址形如 http://<IPv4>:<端口>/mcp。开启后本轮的「联网」服务端工具会自动让位（DeepSeek 不允许两者同时声明）。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 10.dp)
+                    )
+                }
+            }
+
             SettingSection("外观") {
                 Row(
                     modifier = Modifier
@@ -262,7 +316,7 @@ fun SettingsScreen(
                 ) {
                     Text("版本", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                     Text(
-                        "1.0.0",
+                        com.deepseek.chat.BuildConfig.VERSION_NAME,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

@@ -22,7 +22,9 @@ data class StreamResult(
     /** 引用来源（JSON 数组字符串） */
     val annotations: String? = null,
     /** 服务端 Web 工具调用块（JSON 数组字符串，需要原样回传） */
-    val serverToolCalls: String? = null
+    val serverToolCalls: String? = null,
+    /** 客户端函数的 tool_calls（JSON 数组字符串，MCP 场景） */
+    val toolCallsJson: String? = null
 )
 
 /**
@@ -48,6 +50,7 @@ class DeepSeekClient(private val images: ImageStore) {
         effort: String,
         history: List<Msg>,
         systemPrompt: String,
+        functionTools: String? = null,
         onReasoning: (String) -> Unit,
         onContent: (String) -> Unit
     ): StreamResult = withContext(Dispatchers.IO) {
@@ -59,7 +62,7 @@ class DeepSeekClient(private val images: ImageStore) {
             )
         }
 
-        val payload = buildPayload(settings, model, thinking, effort, history, systemPrompt)
+        val payload = buildPayload(settings, model, thinking, effort, history, systemPrompt, functionTools)
         // 图片转 base64 可能耗时，构造完再确认一次是否已被取消
         currentCoroutineContext().ensureActive()
         val conn = (URL(endpoint(settings.baseUrl)).openConnection() as HttpURLConnection).apply {
@@ -96,6 +99,8 @@ class DeepSeekClient(private val images: ImageStore) {
             var finishReason: String? = null
             val annotations = JSONArray()
             val serverToolCalls = JSONArray()
+            // 客户端函数调用按 index 累积分片
+            val toolCallSlots = java.util.TreeMap<Int, JSONObject>()
             BufferedReader(InputStreamReader(input, Charsets.UTF_8)).use { reader ->
                 while (true) {
                     val line = reader.readLine() ?: break
@@ -136,13 +141,40 @@ class DeepSeekClient(private val images: ImageStore) {
                         val content = delta.optString("content")
                         if (content.isNotEmpty()) onContent(content)
                     }
+                    delta.optJSONArray("tool_calls")?.let { calls ->
+                        for (index in 0 until calls.length()) {
+                            val call = calls.optJSONObject(index) ?: continue
+                            val slotIndex = call.optInt("index", 0)
+                            val slot = toolCallSlots.getOrPut(slotIndex) {
+                                JSONObject()
+                                    .put("id", "")
+                                    .put("type", "function")
+                                    .put(
+                                        "function",
+                                        JSONObject().put("name", "").put("arguments", "")
+                                    )
+                            }
+                            call.optString("id").takeIf { it.isNotBlank() }?.let { slot.put("id", it) }
+                            val function = call.optJSONObject("function") ?: continue
+                            function.optString("name").takeIf { it.isNotBlank() }?.let { name ->
+                                slot.getJSONObject("function").put("name", name)
+                            }
+                            function.optString("arguments").takeIf { it.isNotEmpty() }?.let { fragment ->
+                                val target = slot.getJSONObject("function")
+                                target.put("arguments", target.optString("arguments") + fragment)
+                            }
+                        }
+                    }
                 }
             }
+            val assembledCalls = JSONArray()
+            for (slot in toolCallSlots.values) assembledCalls.put(slot)
             StreamResult(
                 usage = usage,
                 finishReason = finishReason,
                 annotations = annotations.takeIf { it.length() > 0 }?.toString(),
-                serverToolCalls = serverToolCalls.takeIf { it.length() > 0 }?.toString()
+                serverToolCalls = serverToolCalls.takeIf { it.length() > 0 }?.toString(),
+                toolCallsJson = assembledCalls.takeIf { it.length() > 0 }?.toString()
             )
         } catch (e: IOException) {
             if (!currentCoroutineContext().isActive) throw CancellationException("请求已取消")
@@ -159,7 +191,8 @@ class DeepSeekClient(private val images: ImageStore) {
         thinking: Boolean,
         effort: String,
         history: List<Msg>,
-        systemPrompt: String
+        systemPrompt: String,
+        functionTools: String?
     ): JSONObject {
         val messages = JSONArray()
         // 单次请求的图片原始字节预算（local，避免并发请求互相扣减）
@@ -168,7 +201,9 @@ class DeepSeekClient(private val images: ImageStore) {
             messages.put(JSONObject().put("role", "system").put("content", systemPrompt.trim()))
         }
         val supportsVision = Models.supportsVision(model)
-        val withTools = settings.webTools
+        val clientTools = functionTools?.takeIf { it.isNotBlank() }
+        // 带 tools 时历史里的 reasoning_content 必须回传
+        val echoTools = clientTools != null || settings.webTools
         for (msg in history) {
             // 每条 user 消息前带一条 latest_reminder：模型每轮都知道今天几号（且不破坏缓存）
             if (msg.role == Role.USER) {
@@ -180,7 +215,7 @@ class DeepSeekClient(private val images: ImageStore) {
             }
             // 只有思考内容、没有正文也没有工具调用的 assistant 消息会让接口报 400，直接跳过
             if (msg.role == Role.ASSISTANT && msg.text.isBlank() && msg.toolCallsJson == null) continue
-            messages.put(messageToJson(msg, supportsVision, withTools, imageBudget))
+            messages.put(messageToJson(msg, supportsVision, echoTools, imageBudget))
         }
         val payload = JSONObject()
             .put("model", model)
@@ -188,7 +223,10 @@ class DeepSeekClient(private val images: ImageStore) {
             .put("stream", true)
             .put("stream_options", JSONObject().put("include_usage", true))
             .put("max_tokens", settings.maxOutputTokens)
-        if (withTools) {
+        if (clientTools != null) {
+            // 客户端函数（MCP 工具）。注意：DeepSeek 不允许和 web 工具同时声明
+            runCatching { payload.put("tools", JSONArray(clientTools)) }
+        } else if (settings.webTools) {
             // 服务端执行的 Web 工具：搜索 / 打开网页都在 DeepSeek 侧完成，客户端不执行工具
             payload.put(
                 "tools",

@@ -23,6 +23,10 @@ data class McpTool(
  */
 class McpClient(private val endpoint: String) {
 
+    constructor(host: String, port: Int) : this(
+        "http://${host.trim().trimEnd('/').removePrefix("http://").removePrefix("https://")}:$port/mcp"
+    )
+
     private var sessionId: String? = null
     private var nextId = 1
 

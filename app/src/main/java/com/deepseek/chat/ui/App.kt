@@ -45,6 +45,7 @@ fun DeepSeekApp(state: ChatUiState, vm: ChatViewModel) {
         SettingsScreen(
             settings = state.settings,
             onChange = vm::updateSettings,
+            onTestMcp = { vm.testMcp() },
             onBack = { vm.setShowSettings(false) }
         )
         return

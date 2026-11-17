@@ -14,8 +14,10 @@ data class Settings(
     val theme: String = ThemeMode.SYSTEM,
     /** 声明服务端 Web 工具（deepseek_web_search / deepseek_read_url），默认开启 */
     val webTools: Boolean = true,
-    /** 远程 MCP 服务器地址（streamable HTTP），空表示不用 MCP */
-    val mcpUrl: String = ""
+    /** 是否启用远程 MCP 服务器（默认关；没服务器时不会发起任何连接） */
+    val mcpEnabled: Boolean = false,
+    val mcpHost: String = "",
+    val mcpPort: Int = 8765
 ) {
     val hasKey: Boolean get() = apiKey.isNotBlank()
 
@@ -41,7 +43,9 @@ class SettingsStore(context: Context) {
         systemPrompt = prefs.getString(KEY_SYSTEM_PROMPT, "").orEmpty(),
         theme = ThemeMode.normalize(prefs.getString(KEY_THEME, ThemeMode.SYSTEM).orEmpty()),
         webTools = prefs.getBoolean(KEY_WEB_TOOLS, true),
-        mcpUrl = prefs.getString(KEY_MCP_URL, "").orEmpty()
+        mcpEnabled = prefs.getBoolean(KEY_MCP_ENABLED, false),
+        mcpHost = prefs.getString(KEY_MCP_HOST, "").orEmpty(),
+        mcpPort = prefs.getInt(KEY_MCP_PORT, 8765)
     )
 
     fun save(settings: Settings) {
@@ -56,7 +60,9 @@ class SettingsStore(context: Context) {
             .putString(KEY_SYSTEM_PROMPT, settings.systemPrompt)
             .putString(KEY_THEME, settings.theme)
             .putBoolean(KEY_WEB_TOOLS, settings.webTools)
-            .putString(KEY_MCP_URL, settings.mcpUrl)
+            .putBoolean(KEY_MCP_ENABLED, settings.mcpEnabled)
+            .putString(KEY_MCP_HOST, settings.mcpHost)
+            .putInt(KEY_MCP_PORT, settings.mcpPort)
             .apply()
     }
 
@@ -71,6 +77,8 @@ class SettingsStore(context: Context) {
         const val KEY_SYSTEM_PROMPT = "system_prompt"
         const val KEY_THEME = "theme"
         const val KEY_WEB_TOOLS = "web_tools"
-        const val KEY_MCP_URL = "mcp_url"
+        const val KEY_MCP_ENABLED = "mcp_enabled"
+        const val KEY_MCP_HOST = "mcp_host"
+        const val KEY_MCP_PORT = "mcp_port"
     }
 }

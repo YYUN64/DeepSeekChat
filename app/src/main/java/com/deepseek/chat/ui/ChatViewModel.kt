@@ -12,6 +12,7 @@ import com.deepseek.chat.data.ConversationMeta
 import com.deepseek.chat.data.DeepSeekClient
 import com.deepseek.chat.data.ImageRef
 import com.deepseek.chat.data.ImageStore
+import com.deepseek.chat.data.McpClient
 import com.deepseek.chat.data.Msg
 import com.deepseek.chat.data.Models
 import com.deepseek.chat.data.Reasoning
@@ -29,6 +30,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import java.io.File
 import java.util.UUID
 
@@ -44,7 +46,9 @@ data class ChatUiState(
     val error: String? = null,
     val notice: String? = null,
     val showSettings: Boolean = false,
-    val lastUsage: Usage? = null
+    val lastUsage: Usage? = null,
+    /** 正在执行的工具名（MCP），null 表示没有 */
+    val toolStatus: String? = null
 ) {
     val messages: List<Msg> get() = conversation?.messages.orEmpty()
 }
@@ -352,41 +356,118 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             var citations: String? = null
             var toolCalls: String? = null
             var cancelled = false
-            try {
-                suspend fun attempt(webTools: Boolean) = client.streamChat(
-                    settings = if (webTools) settings else settings.copy(webTools = false),
-                    model = effectiveModel,
-                    thinking = conversation.thinking,
-                    effort = conversation.effort,
-                    history = history,
-                    systemPrompt = settings.systemPrompt,
-                    onReasoning = { delta ->
-                        reasoning.append(delta)
-                        _state.update { it.copy(streamReasoning = reasoning.toString()) }
-                    },
-                    onContent = { delta ->
-                        content.append(delta)
-                        _state.update { it.copy(streamText = content.toString()) }
+
+            // 只有显式开启且填了地址才去连 MCP，避免没服务器时白等
+            var mcp: McpClient? = null
+            var functionTools: String? = null
+            if (settings.mcpEnabled && settings.mcpHost.isNotBlank()) {
+                try {
+                    val prepared = withContext(Dispatchers.IO) {
+                        val client = McpClient(settings.mcpHost, settings.mcpPort)
+                        client.initialize()
+                        client to client.listTools()
                     }
-                )
-                val result = try {
-                    attempt(settings.webTools)
-                } catch (e: ApiException) {
-                    // 带服务端工具被拒（参数/兼容性问题）时，退回普通请求，保证还能聊
-                    if (settings.webTools && e.statusCode == 400) {
-                        _state.update { it.copy(notice = "联网工具请求被拒绝，已退回普通对话") }
-                        attempt(false)
+                    mcp = prepared.first
+                    val tools = prepared.second
+                    if (tools.isEmpty()) {
+                        mcp = null
+                        _state.update { it.copy(notice = "MCP 服务器没有提供工具，本轮用普通对话") }
                     } else {
+                        functionTools = McpClient.toOpenAiTools(tools).toString()
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    mcp = null
+                    _state.update { it.copy(notice = "MCP 连接失败，本轮用普通对话：${e.message}") }
+                }
+            }
+
+            val requestMessages = history.toMutableList()
+            var rounds = 0
+            var webFallback = false
+            try {
+                while (true) {
+                    content.setLength(0)
+                    reasoning.setLength(0)
+                    val result = try {
+                        client.streamChat(
+                            settings = settings,
+                            model = effectiveModel,
+                            thinking = conversation.thinking,
+                            effort = conversation.effort,
+                            history = requestMessages,
+                            systemPrompt = settings.systemPrompt,
+                            functionTools = functionTools,
+                            onReasoning = { delta ->
+                                reasoning.append(delta)
+                                _state.update { it.copy(streamReasoning = reasoning.toString()) }
+                            },
+                            onContent = { delta ->
+                                content.append(delta)
+                                _state.update { it.copy(streamText = content.toString()) }
+                            }
+                        )
+                    } catch (e: ApiException) {
+                        // 工具声明被拒绝时退回普通请求，保证还能聊
+                        if (e.statusCode == 400 && !webFallback &&
+                            (functionTools != null || settings.webTools)
+                        ) {
+                            webFallback = true
+                            functionTools = null
+                            mcp = null
+                            _state.update { it.copy(notice = "工具请求被拒绝，已退回普通对话") }
+                            continue
+                        }
                         throw e
                     }
+                    usage = result.usage
+                    citations = result.annotations
+                    toolCalls = result.serverToolCalls
+
+                    val calls = result.toolCallsJson
+                    val activeMcp = mcp
+                    if (calls.isNullOrBlank() || activeMcp == null) break
+                    if (rounds >= MAX_TOOL_ROUNDS) {
+                        failure = "工具调用超过 $MAX_TOOL_ROUNDS 轮，已停止"
+                        break
+                    }
+                    rounds++
+                    // 把带 tool_calls 的 assistant 轮次和工具结果接进上下文，再请求一次
+                    requestMessages += Msg(
+                        id = UUID.randomUUID().toString(),
+                        role = Role.ASSISTANT,
+                        text = content.toString(),
+                        reasoning = reasoning.toString(),
+                        toolCallsJson = calls,
+                        model = effectiveModel
+                    )
+                    val array = JSONArray(calls)
+                    for (index in 0 until array.length()) {
+                        val call = array.optJSONObject(index) ?: continue
+                        val function = call.optJSONObject("function")
+                        val name = function?.optString("name").orEmpty()
+                        val arguments = function?.optString("arguments").orEmpty().ifBlank { "{}" }
+                        _state.update { it.copy(toolStatus = "调用工具：$name") }
+                        val output = withContext(Dispatchers.IO) {
+                            runCatching { activeMcp.callTool(name, arguments) }
+                                .getOrElse { "工具调用失败：${it.message}" }
+                        }
+                        requestMessages += Msg(
+                            id = UUID.randomUUID().toString(),
+                            role = Role.TOOL,
+                            toolCallId = call.optString("id"),
+                            text = output.take(MAX_TOOL_OUTPUT)
+                        )
+                    }
+                    _state.update { it.copy(toolStatus = null) }
                 }
-                usage = result.usage
-                citations = result.annotations
-                toolCalls = result.serverToolCalls
             } catch (e: CancellationException) {
                 cancelled = true
             } catch (e: Exception) {
                 failure = e.message ?: "请求失败"
+            } finally {
+                _state.update { it.copy(toolStatus = null) }
             }
 
             // 已经被新一轮请求取代：直接丢弃，避免把过期内容写进当前会话。
@@ -478,6 +559,36 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(showSettings = show, error = null) }
     }
 
+    /** 设置页「测试连接」：握手并列出工具名 */
+    fun testMcp() {
+        val settings = _state.value.settings
+        if (!settings.mcpEnabled || settings.mcpHost.isBlank()) {
+            _state.update { it.copy(notice = "先打开 MCP 开关并填好服务器地址") }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(notice = "正在连接 MCP…") }
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val client = McpClient(settings.mcpHost, settings.mcpPort)
+                    client.initialize()
+                    client.listTools()
+                }
+            }
+            _state.update {
+                it.copy(
+                    notice = result.fold(
+                        onSuccess = { tools ->
+                            if (tools.isEmpty()) "连上了，但服务器没有提供工具"
+                            else "MCP 连接成功，工具：" + tools.joinToString("、") { tool -> tool.name }
+                        },
+                        onFailure = { e -> "MCP 连接失败：${e.message}" }
+                    )
+                )
+            }
+        }
+    }
+
     fun updateSettings(settings: Settings) {
         settingsStore.save(settings)
         _state.update { current ->
@@ -555,5 +666,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         const val MAX_IMAGES = 6
+        const val MAX_TOOL_ROUNDS = 4
+        const val MAX_TOOL_OUTPUT = 8000
     }
 }

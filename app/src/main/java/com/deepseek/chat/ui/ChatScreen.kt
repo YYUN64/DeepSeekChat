@@ -196,6 +196,15 @@ fun ChatScreen(
                 if (error != null) {
                     ErrorBanner(message = error, onDismiss = onDismissError)
                 }
+                val toolStatus = state.toolStatus
+                if (toolStatus != null) {
+                    Text(
+                        text = toolStatus,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 20.dp, bottom = 4.dp)
+                    )
+                }
                 Composer(
                     input = state.input,
                     onInput = onInput,
