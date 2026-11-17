@@ -39,7 +39,16 @@ jobs:
       - name: Build debug APK
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+          set +e
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace > /tmp/build.log 2>&1
+          code=$?
+          tail -n 80 /tmp/build.log
+          if [ "$code" -ne 0 ]; then
+            # 把失败原因写成 annotation，方便在 API / 检查页面直接看到
+            msg=$(grep -E "^(FAILURE|e: |\* What went wrong|Caused by:|Could not|> Could not)" -A3 /tmp/build.log | head -n 40 | tr '\n' '|' | cut -c1-900)
+            echo "::error title=Gradle failed::$msg"
+            exit "$code"
+          fi
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
