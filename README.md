@@ -7,6 +7,8 @@
 只做四件事：**图片上传、思考深度、会话历史、上下文长度**，其余能省就省。
 
 > 这是第三方客户端，不是官方 App。你的 API Key 只保存在本机。
+>
+> 应用名 **DeepSeek Lite**，包名 `io.github.yyun64.deepseekchat` —— 官方 App 的包名正是 `com.deepseek.chat`，两者可以同时安装、互不影响。
 
 ---
 
