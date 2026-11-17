@@ -1,4 +1,4 @@
-﻿package com.deepseek.chat.ui
+package com.deepseek.chat.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -302,10 +302,7 @@ private fun ReasoningPanel(
                         Text(
                             text = text,
                             style = MaterialTheme.typography.bodySmall.copy(lineHeight = 19.sp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier
-                                .height(240.dp)
-                                .verticalScroll(reasoningScroll)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }

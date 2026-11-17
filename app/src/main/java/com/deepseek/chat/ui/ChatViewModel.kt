@@ -136,6 +136,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // ---------------------------------------------------------------- 会话
 
     fun newConversation() {
+        flushPartial()
         stopStreaming()
         inputSession++
         val settings = _state.value.settings
@@ -158,8 +159,37 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * 切换到别的会话前，把正在流式输出的内容落盘。
+     * 否则 stopStreaming() 之后立刻从磁盘 load，读到的还是旧内容，思考过程就丢了。
+     */
+    private fun flushPartial() {
+        val state = _state.value
+        val conversation = state.conversation ?: return
+        if (!state.streaming) return
+        val text = state.streamText
+        val thought = state.streamReasoning
+        if (text.isBlank() && thought.isBlank()) return
+        val partial = Msg(
+            id = UUID.randomUUID().toString(),
+            role = Role.ASSISTANT,
+            text = text,
+            reasoning = thought,
+            error = "已停止"
+        )
+        val updated = conversation.copy(
+            messages = conversation.messages + partial,
+            updatedAt = System.currentTimeMillis()
+        )
+        runCatching { chatStore.save(updated) }
+        // 让还在跑的那次请求作废，避免它结束后再补一条重复消息
+        round++
+        _state.update { it.copy(conversation = updated, streaming = false, streamText = "", streamReasoning = "") }
+    }
+
     fun openConversation(id: String) {
         if (_state.value.conversation?.id == id && !_state.value.streaming) return
+        flushPartial()
         stopStreaming()
         inputSession++
         val conversation = chatStore.load(id)

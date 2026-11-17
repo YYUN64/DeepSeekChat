@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -131,10 +132,18 @@ fun ChatScreen(
         }
     }
     LaunchedEffect(messages.size) { followBottom = true }
-    LaunchedEffect(itemCount, state.streamText.length / 40) {
+    LaunchedEffect(
+        itemCount,
+        state.streamText.length / 40,
+        // 思考阶段没有正文，只有思考内容在长：也要跟随，否则内容会往屏幕下方跑出去
+        state.streamReasoning.length / 40
+    ) {
         if (itemCount > 0 && followBottom) {
-            // 大偏移量让长消息也滚到真正底部（内部会按内容边界裁剪）
-            listState.scrollToItem(itemCount - 1, 100_000)
+            // 先定位到最后一条，再用 scrollBy 滚到真正的底部。
+            // 不用超大的 scrollToItem 偏移量：那会让偏移长期越界，每帧被夹紧，
+            // 展开思考面板或内容增长时就会抖。
+            listState.scrollToItem(itemCount - 1)
+            listState.scrollBy(1_000_000f)
         }
     }
     LaunchedEffect(state.notice) {
