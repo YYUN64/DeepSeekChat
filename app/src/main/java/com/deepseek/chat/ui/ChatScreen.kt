@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -48,9 +47,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -69,8 +66,6 @@ import com.deepseek.chat.data.Models
 import com.deepseek.chat.data.Msg
 import com.deepseek.chat.data.Role
 import com.deepseek.chat.data.TokenCounter
-import kotlinx.coroutines.flow.conflate
-import kotlinx.coroutines.flow.distinctUntilChanged
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -121,38 +116,14 @@ fun ChatScreen(
         append(ContextLimits.label(state.settings.contextTokens))
     }
 
-    // 只有用户停在底部时才跟随；手动往上翻之后不再强行拽回
-    var followBottom by remember { mutableStateOf(true) }
-    val latestState = rememberUpdatedState(state)
-    LaunchedEffect(listState) {
-        // 拖动/惯性滚动结束后重新判断是否贴底：往上翻就停止跟随，自己滚回底部再恢复。
-        // 只处理真正的滚动结束（跳过首次组合时的 false），避免刚打开会话就被判成"用户翻上去了"
-        var wasScrolling = false
-        snapshotFlow { listState.isScrollInProgress }
-            .distinctUntilChanged()
-            .collect { scrolling ->
-                if (wasScrolling && !scrolling) followBottom = !listState.canScrollForward
-                wasScrolling = scrolling
-            }
+    // 列表用 reverseLayout 贴底（越靠前的 item 越靠视觉底部）：内容长高时由布局直接吸收，
+    // 不需要每来一个字就手动 scroll，也就不存在「先长出来、下一帧再弹回」的上下跳。
+    // 打开会话 / 自己发消息时一次性回到底部；其余时候不打扰用户的阅读位置。
+    LaunchedEffect(conversation?.id) {
+        if (state.messages.isNotEmpty() || state.streaming) listState.scrollToItem(0)
     }
-    LaunchedEffect(messages.size) { followBottom = true }
-    LaunchedEffect(listState) {
-        // 每次流式内容更新后只做一次「滚到真正的底部」。
-        // 不用 scrollToItem(last) 归位：那会先把长条目顶到视口顶部、再滚回底部，
-        // 两步之间只要渲染出一帧就是一次上下跳；这里一次 scrollBy 直接夹到底部。
-        snapshotFlow {
-            Triple(
-                latestState.value.conversation?.messages?.size ?: 0,
-                latestState.value.streamText.length,
-                latestState.value.streamReasoning.length
-            )
-        }
-            .conflate()
-            .collect {
-                if (followBottom && !listState.isScrollInProgress) {
-                    listState.scrollBy(1_000_000f)
-                }
-            }
+    LaunchedEffect(messages.size) {
+        if (messages.lastOrNull()?.role == Role.USER) listState.scrollToItem(0)
     }
     LaunchedEffect(state.notice) {
         val notice = state.notice
@@ -239,43 +210,53 @@ fun ChatScreen(
             }
         }
     ) { innerPadding ->
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
-        ) {
-            if (messages.isEmpty() && !state.streaming) {
-                item(key = "empty") {
-                    EmptyState(hasKey = state.settings.hasKey)
+        if (messages.isEmpty() && !state.streaming) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
+                EmptyState(hasKey = state.settings.hasKey)
+            }
+        } else {
+            LazyColumn(
+                state = listState,
+                // 贴底布局：第 0 项在最下面，内容长高时自动向上顶，视口天然跟随最新文字
+                reverseLayout = true,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+                // reverseLayout 下 top/bottom 是反的：start 是视觉底部
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp)
+            ) {
+                // 越靠前的 item 越贴底：正在流式的消息永远在第一项，
+                // 历史消息倒序排在它上面（视觉上仍是旧→新）
+                if (state.streaming) {
+                    item(key = "streaming") {
+                        MessageItem(
+                            msg = Msg(
+                                id = "streaming",
+                                role = Role.ASSISTANT,
+                                text = state.streamText,
+                                reasoning = state.streamReasoning,
+                                model = model
+                            ),
+                            streaming = true,
+                            imageLoader = imageLoader,
+                            onRegenerate = null,
+                            onImageClick = {}
+                        )
+                    }
                 }
-            }
-            items(messages, key = { it.id }) { msg ->
-                val lastAssistantId = messages.lastOrNull { it.role == Role.ASSISTANT }?.id
-                MessageItem(
-                    msg = msg,
-                    streaming = false,
-                    imageLoader = imageLoader,
-                    onRegenerate = if (msg.id == lastAssistantId) onRegenerate else null,
-                    onImageClick = { preview = it }
-                )
-            }
-            if (state.streaming) {
-                item(key = "streaming") {
+                items(messages.asReversed(), key = { it.id }) { msg ->
+                    val lastAssistantId = messages.lastOrNull { it.role == Role.ASSISTANT }?.id
                     MessageItem(
-                        msg = Msg(
-                            id = "streaming",
-                            role = Role.ASSISTANT,
-                            text = state.streamText,
-                            reasoning = state.streamReasoning,
-                            model = model
-                        ),
-                        streaming = true,
+                        msg = msg,
+                        streaming = false,
                         imageLoader = imageLoader,
-                        onRegenerate = null,
-                        onImageClick = {}
+                        onRegenerate = if (msg.id == lastAssistantId) onRegenerate else null,
+                        onImageClick = { preview = it }
                     )
                 }
             }
