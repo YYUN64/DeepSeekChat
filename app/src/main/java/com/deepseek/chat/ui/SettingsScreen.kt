@@ -1,5 +1,6 @@
 package com.deepseek.chat.ui
 
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -38,6 +40,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -60,6 +66,34 @@ fun SettingsScreen(
     var showContextPicker by remember { mutableStateOf(false) }
     var showOutputPicker by remember { mutableStateOf(false) }
     val level = Reasoning.levelOf(settings.thinking, settings.effort)
+    val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    // 端口输入框和 settings.mcpPort 解耦：本地文本允许暂时为空/非法，
+    // 只有解析成 1..65535 才写回 settings（否则退格永远删不掉最后一位数字）。
+    // portFallback 记录“这次编辑开始前的合法端口”，清空后回退到它，
+    // 而不是回退到输入过程中写进去的中间值（比如 9000 一路删成 9）。
+    var portText by remember { mutableStateOf(settings.mcpPort.toString()) }
+    var portFallback by remember {
+        mutableStateOf(settings.mcpPort.takeIf { it in 1..65535 } ?: Settings.DEFAULT_MCP_PORT)
+    }
+
+    fun commitPort() {
+        val parsed = Settings.parsePort(portText)
+        if (parsed != null) {
+            if (parsed != settings.mcpPort) onChange(settings.copy(mcpPort = parsed))
+            portFallback = parsed
+            return
+        }
+        // 失焦 / 点测试连接时回退到编辑前的合法值（默认 8765），避免“显示空但实际用旧值”
+        val restored = portFallback.takeIf { it in 1..65535 } ?: Settings.DEFAULT_MCP_PORT
+        portText = restored.toString()
+        if (settings.mcpPort != restored) onChange(settings.copy(mcpPort = restored))
+        Toast.makeText(
+            context,
+            "端口需在 1–65535，已恢复为 $restored",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -228,24 +262,46 @@ fun SettingsScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         OutlinedTextField(
-                            value = settings.mcpPort.toString(),
-                            onValueChange = { text ->
-                                text.filter { it.isDigit() }.take(5).toIntOrNull()
-                                    ?.let { onChange(settings.copy(mcpPort = it)) }
+                            value = portText,
+                            onValueChange = { raw ->
+                                val digits = raw.filter { it.isDigit() }.take(5)
+                                portText = digits
+                                Settings.parsePort(digits)?.let { onChange(settings.copy(mcpPort = it)) }
                             },
                             label = { Text("端口") },
                             singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Number,
+                                imeAction = ImeAction.Done
+                            ),
+                            keyboardActions = KeyboardActions(onDone = {
+                                commitPort()
+                                focusManager.clearFocus()
+                            }),
                             modifier = Modifier
                                 .width(96.dp)
                                 .padding(vertical = 8.dp)
+                                .onFocusChanged { state ->
+                                    if (state.isFocused) {
+                                        // 记下这次编辑开始前的合法端口
+                                        portFallback = Settings.parsePort(portText)
+                                            ?: settings.mcpPort.takeIf { it in 1..65535 }
+                                            ?: Settings.DEFAULT_MCP_PORT
+                                    } else {
+                                        commitPort()
+                                    }
+                                }
                         )
                     }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End
                     ) {
-                        TextButton(onClick = onTestMcp) { Text("测试连接") }
+                        // 点「测试连接」前先把端口输入框里没提交的内容校验一遍
+                        TextButton(onClick = {
+                            commitPort()
+                            onTestMcp()
+                        }) { Text("测试连接") }
                     }
                     Text(
                         text = "地址形如 http://<IPv4>:<端口>/mcp。开启后本轮的「联网」服务端工具会自动让位（DeepSeek 不允许两者同时声明）。",

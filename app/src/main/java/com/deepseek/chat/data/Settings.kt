@@ -17,12 +17,17 @@ data class Settings(
     /** 是否启用远程 MCP 服务器（默认关；没服务器时不会发起任何连接） */
     val mcpEnabled: Boolean = false,
     val mcpHost: String = "",
-    val mcpPort: Int = 8765
+    val mcpPort: Int = DEFAULT_MCP_PORT
 ) {
     val hasKey: Boolean get() = apiKey.isNotBlank()
 
     companion object {
         const val DEFAULT_BASE_URL = "https://api.deepseek.com"
+        const val DEFAULT_MCP_PORT = 8765
+
+        /** 端口解析：只接受 1..65535 的纯数字，空串/非法返回 null（界面据此保留原始输入） */
+        fun parsePort(text: String): Int? =
+            text.trim().toIntOrNull()?.takeIf { it in 1..65535 }
     }
 }
 
@@ -45,7 +50,7 @@ class SettingsStore(context: Context) {
         webTools = prefs.getBoolean(KEY_WEB_TOOLS, true),
         mcpEnabled = prefs.getBoolean(KEY_MCP_ENABLED, false),
         mcpHost = prefs.getString(KEY_MCP_HOST, "").orEmpty(),
-        mcpPort = prefs.getInt(KEY_MCP_PORT, 8765)
+        mcpPort = prefs.getInt(KEY_MCP_PORT, Settings.DEFAULT_MCP_PORT)
     )
 
     fun save(settings: Settings) {
