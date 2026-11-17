@@ -79,7 +79,7 @@ class ChatStore(root: File) {
             updatedAt = root.optLong("updatedAt", now),
             model = root.optString("model").ifBlank { Models.FLASH },
             thinking = root.optBoolean("thinking", true),
-            effort = Efforts.normalize(root.optString("effort")),
+            effort = Reasoning.effortFor(root.optString("effort")),
             messages = messages
         )
     }

@@ -7,7 +7,7 @@ data class Settings(
     val baseUrl: String = DEFAULT_BASE_URL,
     val model: String = Models.FLASH,
     val thinking: Boolean = true,
-    val effort: String = Efforts.MEDIUM,
+    val effort: String = Reasoning.HIGH,
     val contextTokens: Int = 131_072,
     val maxOutputTokens: Int = 8_192,
     val systemPrompt: String = ""
@@ -30,7 +30,7 @@ class SettingsStore(context: Context) {
             ?.takeIf { it.isNotBlank() } ?: Settings.DEFAULT_BASE_URL,
         model = prefs.getString(KEY_MODEL, Models.FLASH)?.takeIf { it.isNotBlank() } ?: Models.FLASH,
         thinking = prefs.getBoolean(KEY_THINKING, true),
-        effort = Efforts.normalize(prefs.getString(KEY_EFFORT, Efforts.MEDIUM).orEmpty()),
+        effort = Reasoning.effortFor(prefs.getString(KEY_EFFORT, Reasoning.HIGH).orEmpty()),
         contextTokens = prefs.getInt(KEY_CONTEXT, 131_072),
         maxOutputTokens = prefs.getInt(KEY_OUTPUT, 8_192),
         systemPrompt = prefs.getString(KEY_SYSTEM_PROMPT, "").orEmpty()

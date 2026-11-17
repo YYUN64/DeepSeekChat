@@ -57,7 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.deepseek.chat.data.ContextLimits
 import com.deepseek.chat.data.Conversation
-import com.deepseek.chat.data.Efforts
+import com.deepseek.chat.data.Reasoning
 import com.deepseek.chat.data.ImageRef
 import com.deepseek.chat.data.Models
 import com.deepseek.chat.data.Msg
@@ -81,8 +81,7 @@ fun ChatScreen(
     onDismissError: () -> Unit,
     onClearNotice: () -> Unit,
     onSetModel: (String) -> Unit,
-    onSetThinking: (Boolean) -> Unit,
-    onSetEffort: (String) -> Unit
+    onSetReasoning: (String) -> Unit
 ) {
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -92,8 +91,10 @@ fun ChatScreen(
     val conversation = state.conversation
     val messages = conversation?.messages.orEmpty()
     val model = conversation?.model ?: state.settings.model
-    val thinking = conversation?.thinking ?: state.settings.thinking
-    val effort = conversation?.effort ?: state.settings.effort
+    val level = Reasoning.levelOf(
+        conversation?.thinking ?: state.settings.thinking,
+        conversation?.effort ?: state.settings.effort
+    )
 
     val historyTokens = remember(messages) { TokenCounter.estimateAll(messages) }
     val streamTokens = remember(state.streamText, state.streamReasoning) {
@@ -103,7 +104,7 @@ fun ChatScreen(
     val subtitle = buildString {
         append(Models.label(model))
         append(" · ")
-        append(if (thinking) "深度思考·${Efforts.label(effort)}" else "快速回答")
+        append(if (level == Reasoning.OFF) "不推理" else "推理·${Reasoning.label(level)}")
         append(" · 上下文 ")
         append(TokenCounter.describe(usedTokens))
         append(" / ")
@@ -253,11 +254,9 @@ fun ChatScreen(
     if (showOptions) {
         ConversationOptionsDialog(
             model = model,
-            thinking = thinking,
-            effort = effort,
+            level = level,
             onSetModel = onSetModel,
-            onSetThinking = onSetThinking,
-            onSetEffort = onSetEffort,
+            onSetReasoning = onSetReasoning,
             onDismiss = { showOptions = false }
         )
     }
@@ -359,11 +358,9 @@ private fun EmptyState(hasKey: Boolean, onPick: (String) -> Unit) {
 @Composable
 private fun ConversationOptionsDialog(
     model: String,
-    thinking: Boolean,
-    effort: String,
+    level: String,
     onSetModel: (String) -> Unit,
-    onSetThinking: (Boolean) -> Unit,
-    onSetEffort: (String) -> Unit,
+    onSetReasoning: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
     AlertDialog(
@@ -397,17 +394,10 @@ private fun ConversationOptionsDialog(
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
-                SwitchRow(
-                    label = "深度思考",
-                    description = "先推理再回答，适合复杂问题",
-                    checked = thinking,
-                    onCheckedChange = onSetThinking
-                )
-                Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "思考强度",
+                    text = "推理等级",
                     style = MaterialTheme.typography.labelLarge,
-                    color = if (thinking) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.primary
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
@@ -416,17 +406,17 @@ private fun ConversationOptionsDialog(
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    for (preset in Efforts.presets) {
+                    for (preset in Reasoning.presets) {
                         SelectableChip(
-                            label = Efforts.label(preset),
-                            selected = effort == preset,
-                            onClick = { if (thinking) onSetEffort(preset) }
+                            label = Reasoning.label(preset),
+                            selected = level == preset,
+                            onClick = { onSetReasoning(preset) }
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "越强越慢。DeepSeek 服务端会把“中”映射为 high，把“极致”映射为 max。",
+                    text = Reasoning.hint(level),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

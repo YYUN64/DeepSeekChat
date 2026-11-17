@@ -9,11 +9,11 @@ import com.deepseek.chat.data.ChatStore
 import com.deepseek.chat.data.Conversation
 import com.deepseek.chat.data.ConversationMeta
 import com.deepseek.chat.data.DeepSeekClient
-import com.deepseek.chat.data.Efforts
 import com.deepseek.chat.data.ImageRef
 import com.deepseek.chat.data.ImageStore
 import com.deepseek.chat.data.Msg
 import com.deepseek.chat.data.Models
+import com.deepseek.chat.data.Reasoning
 import com.deepseek.chat.data.Role
 import com.deepseek.chat.data.Settings
 import com.deepseek.chat.data.SettingsStore
@@ -225,12 +225,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         applyConversation(ensureConversation().copy(model = model))
     }
 
-    fun setThinking(enabled: Boolean) {
-        applyConversation(ensureConversation().copy(thinking = enabled))
-    }
-
-    fun setEffort(effort: String) {
-        applyConversation(ensureConversation().copy(effort = Efforts.normalize(effort)))
+    fun setReasoning(level: String) {
+        applyConversation(
+            ensureConversation().copy(
+                thinking = Reasoning.thinkingOf(level),
+                effort = Reasoning.effortFor(level)
+            )
+        )
     }
 
     // ---------------------------------------------------------------- 发送

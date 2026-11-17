@@ -39,8 +39,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.deepseek.chat.data.ContextLimits
-import com.deepseek.chat.data.Efforts
 import com.deepseek.chat.data.Models
+import com.deepseek.chat.data.Reasoning
 import com.deepseek.chat.data.Settings
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -53,6 +53,7 @@ fun SettingsScreen(
     var showKey by remember { mutableStateOf(false) }
     var showContextPicker by remember { mutableStateOf(false) }
     var showOutputPicker by remember { mutableStateOf(false) }
+    val level = Reasoning.levelOf(settings.thinking, settings.effort)
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -155,47 +156,35 @@ fun SettingsScreen(
                 )
             }
 
-            SettingSection("深度思考") {
-                SwitchRow(
-                    label = "开启深度思考",
-                    description = "回答前先输出一段思考过程",
-                    checked = settings.thinking,
-                    onCheckedChange = { onChange(settings.copy(thinking = it)) }
-                )
-                SectionDivider()
+            SettingSection("推理等级") {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .horizontalScroll(rememberScrollState())
+                        .padding(vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        text = "思考强度",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = if (settings.thinking) {
-                            MaterialTheme.colorScheme.onSurface
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        modifier = Modifier.padding(end = 10.dp)
-                    )
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        for (preset in Efforts.presets) {
-                            SelectableChip(
-                                label = Efforts.label(preset),
-                                selected = settings.effort == preset,
-                                onClick = {
-                                    if (settings.thinking) {
-                                        onChange(settings.copy(effort = preset))
-                                    }
-                                }
-                            )
-                        }
+                    for (preset in Reasoning.presets) {
+                        SelectableChip(
+                            label = Reasoning.label(preset),
+                            selected = level == preset,
+                            onClick = {
+                                onChange(
+                                    settings.copy(
+                                        thinking = Reasoning.thinkingOf(preset),
+                                        effort = Reasoning.effortFor(preset)
+                                    )
+                                )
+                            }
+                        )
                     }
                 }
+                Text(
+                    text = Reasoning.hint(level),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 10.dp)
+                )
             }
 
             SettingSection("上下文与输出") {
@@ -211,7 +200,7 @@ fun SettingsScreen(
                     onClick = { showOutputPicker = true }
                 )
                 Text(
-                    text = "超出上下文长度时，会自动丢掉最早的对话；思考强度与上下文长度都会影响 token 消耗。",
+                    text = "超出上下文长度时，会自动丢掉最早的对话；推理等级与上下文长度都会影响 token 消耗。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 10.dp)

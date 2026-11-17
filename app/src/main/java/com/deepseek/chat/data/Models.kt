@@ -47,7 +47,7 @@ data class Conversation(
     val updatedAt: Long = System.currentTimeMillis(),
     val model: String = Models.FLASH,
     val thinking: Boolean = true,
-    val effort: String = Efforts.MEDIUM,
+    val effort: String = Reasoning.HIGH,
     val messages: List<Msg> = emptyList()
 ) {
     companion object {
@@ -83,23 +83,54 @@ object Models {
     fun supportsVision(model: String): Boolean = model == FLASH
 }
 
-object Efforts {
+/**
+ * 推理等级，取值与 DeepSeek Harness 一致：off / low / high / max。
+ * 存储上仍复用 thinking + effort 两个字段（老会话无需迁移），这里负责互相换算。
+ */
+object Reasoning {
+    const val OFF = "off"
     const val LOW = "low"
-    const val MEDIUM = "medium"
     const val HIGH = "high"
     const val MAX = "max"
 
-    val presets = listOf(LOW, MEDIUM, HIGH, MAX)
+    val presets = listOf(OFF, LOW, HIGH, MAX)
 
-    fun label(effort: String): String = when (effort) {
+    fun label(level: String): String = when (normalize(level)) {
+        OFF -> "关闭"
         LOW -> "低"
-        MEDIUM -> "中"
         HIGH -> "高"
         MAX -> "极致"
-        else -> effort
+        else -> level
     }
 
-    fun normalize(effort: String): String = if (effort in presets) effort else MEDIUM
+    fun hint(level: String): String = when (normalize(level)) {
+        OFF -> "不推理，直接回答，最快"
+        LOW -> "少量推理，适合简单问题"
+        HIGH -> "默认档，适合大多数问题"
+        MAX -> "推理最充分，最慢，适合难题"
+        else -> ""
+    }
+
+    /** 兼容历史值：none/minimal/medium/xhigh/ultra 等统一收敛到四档 */
+    fun normalize(level: String): String = when (level.trim().lowercase()) {
+        OFF, "none", "disabled", "false" -> OFF
+        LOW, "minimal" -> LOW
+        HIGH, "medium", "xhigh", "true" -> HIGH
+        MAX, "ultra" -> MAX
+        else -> HIGH
+    }
+
+    /** 由旧的 thinking + effort 推导出等级 */
+    fun levelOf(thinking: Boolean, effort: String): String =
+        if (!thinking) OFF else normalize(effort)
+
+    fun thinkingOf(level: String): Boolean = normalize(level) != OFF
+
+    /** 发给接口的 reasoning_effort，绝不返回 off（关闭时走 thinking.disabled） */
+    fun effortFor(level: String): String {
+        val n = normalize(level)
+        return if (n == OFF) HIGH else n
+    }
 }
 
 object ContextLimits {

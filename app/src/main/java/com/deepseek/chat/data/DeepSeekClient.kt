@@ -161,7 +161,7 @@ class DeepSeekClient(private val images: ImageStore) {
             .put("max_tokens", settings.maxOutputTokens)
         if (thinking) {
             payload.put("thinking", JSONObject().put("type", "enabled"))
-            payload.put("reasoning_effort", Efforts.normalize(effort))
+            payload.put("reasoning_effort", Reasoning.effortFor(effort))
         } else {
             payload.put("thinking", JSONObject().put("type", "disabled"))
         }

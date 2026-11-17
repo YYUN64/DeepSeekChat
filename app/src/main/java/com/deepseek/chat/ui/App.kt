@@ -87,8 +87,7 @@ fun DeepSeekApp(state: ChatUiState, vm: ChatViewModel) {
             onDismissError = { vm.clearError() },
             onClearNotice = { vm.clearNotice() },
             onSetModel = { model -> vm.setModel(model) },
-            onSetThinking = { enabled -> vm.setThinking(enabled) },
-            onSetEffort = { effort -> vm.setEffort(effort) }
+            onSetReasoning = { level -> vm.setReasoning(level) }
         )
     }
 }

@@ -17,7 +17,7 @@
 | 能力 | 说明 |
 | --- | --- |
 | 图片上传 | 从相册选图，自动缩放（最长边 1600px）并按 EXIF 旋转，以 base64 内联发送；使用 `deepseek-flash` 的原生视觉能力（支持 JPEG/PNG/GIF/WebP） |
-| 思考深度 | 开关「深度思考」+ 四档强度（低/中/高/极致 → `reasoning_effort` 的 `low/medium/high/max`）；思考过程以可折叠面板展示，流式输出 |
+| 思考深度 | 四档「推理等级」：关闭 / 低 / 高 / 极致（与 DeepSeek Harness 的 off/low/high/max 一致）；思考过程以可折叠面板展示，流式输出 |
 | 会话历史 | 每个会话一个 JSON 文件，自动命名、重命名、删除、清空；重启后自动恢复最近会话 |
 | 上下文长度 | 16K / 32K / 64K / 128K / 256K / 512K / 1M 可选，超出预算自动丢弃最早的对话；顶栏实时显示估算用量 |
 
@@ -68,8 +68,7 @@
 | App 里的选项 | 请求里的字段 |
 | --- | --- |
 | 模型 Flash / V4 Pro | `model` = `deepseek-flash` / `deepseek-v4-pro` |
-| 深度思考开关 | `thinking` = `{"type": "enabled"}` / `{"type": "disabled"}` |
-| 思考强度 低/中/高/极致 | `reasoning_effort` = `low` / `medium` / `high` / `max` |
+| 推理等级 关闭/低/高/极致 | 关闭 → `thinking` = `{"type": "disabled"}`；低/高/极致 → `thinking` = `{"type": "enabled"}` + `reasoning_effort` = `low` / `high` / `max` |
 | 上下文长度 | 客户端裁剪历史消息的预算（模型本身支持 1M） |
 | 最大回复长度 | `max_tokens`（1 ~ 393216） |
 | 系统提示词 | `messages` 开头的 `system` 消息 |
