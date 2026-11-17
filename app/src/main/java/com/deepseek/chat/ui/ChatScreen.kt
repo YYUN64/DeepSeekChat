@@ -1,5 +1,6 @@
 package com.deepseek.chat.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -27,7 +28,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ExpandMore
-import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -52,6 +52,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -144,8 +145,11 @@ fun ChatScreen(
             CenterAlignedTopAppBar(
                 navigationIcon = {
                     IconButton(onClick = onOpenDrawer) {
-                        // 三条长度递减的横线，与官方 App 的历史入口一致
-                        Icon(Icons.Outlined.FilterList, contentDescription = "会话列表")
+                        // 三条左对齐、长度递减的横线，与官方 App 的历史入口一致
+                        Icon(
+                            painter = painterResource(R.drawable.ic_history_lines),
+                            contentDescription = "会话列表"
+                        )
                     }
                 },
                 title = {
@@ -296,20 +300,14 @@ private fun EmptyState(hasKey: Boolean) {
             .padding(top = 150.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(
+        Image(
+            painter = painterResource(R.drawable.avatar),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
             modifier = Modifier
-                .size(84.dp)
+                .size(92.dp)
                 .clip(CircleShape)
-                .background(Color(0xFF4D6BFE)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_launcher_foreground),
-                contentDescription = null,
-                tint = Color.White,
-                modifier = Modifier.size(66.dp)
-            )
-        }
+        )
         Spacer(modifier = Modifier.height(20.dp))
         Text(
             text = "今天有什么可以帮到你？",

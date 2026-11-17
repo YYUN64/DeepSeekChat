@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 历史入口：三条左对齐、长度依次递减的横线 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M3,5h18v2.4h-18z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M3,10.8h12v2.4h-12z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M3,16.6h6v2.4h-6z" />
+</vector>
