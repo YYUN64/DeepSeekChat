@@ -1,5 +1,7 @@
 # DeepSeek Chat（Android 客户端）
 
+[![Build APK](https://github.com/YYUN64/DeepSeekChat/actions/workflows/android.yml/badge.svg)](https://github.com/YYUN64/DeepSeekChat/actions/workflows/android.yml)
+
 一个用 **DeepSeek 官方 API** 驱动的 Android 聊天客户端，界面和交互参照官方 App：极简聊天页 + 历史会话抽屉 + 设置页。
 
 只做四件事：**图片上传、思考深度、会话历史、上下文长度**，其余能省就省。
@@ -28,8 +30,10 @@
 ### 方式一：GitHub Actions 直接拿 APK（不用装 Android Studio）
 
 1. 把本目录推到 GitHub 仓库（`.github/workflows/android.yml` 已包含）。
-2. 打开仓库的 **Actions → Build APK → Run workflow**。
+2. 每次 push 到 `main` 都会自动构建；也可以在 **Actions → Build APK → Run workflow** 手动触发。
 3. 跑完在 Artifacts 里下载 `DeepSeekChat-debug`，解压得到 `app-debug.apk`，传到手机上安装（需允许「安装未知来源应用」）。
+
+> CI 里用的是 Google 官方 Maven 仓库；阿里云镜像只在本地环境（`CI` 环境变量为空时）优先使用。
 
 ### 方式二：Android Studio
 
