@@ -9,6 +9,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.fillMaxSize
@@ -33,6 +34,11 @@ fun DeepSeekApp(state: ChatUiState, vm: ChatViewModel) {
     BackHandler(enabled = state.showSettings) { vm.setShowSettings(false) }
     BackHandler(enabled = !state.showSettings && drawerState.isOpen) {
         scope.launch { drawerState.close() }
+    }
+
+    // 只有真正打开抽屉时才去读磁盘上的会话列表（启动阶段不碰）
+    LaunchedEffect(drawerState.currentValue) {
+        if (drawerState.currentValue == DrawerValue.Open) vm.loadHistory()
     }
 
     if (state.showSettings) {

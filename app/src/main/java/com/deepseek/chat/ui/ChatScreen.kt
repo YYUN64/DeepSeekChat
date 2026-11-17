@@ -156,7 +156,10 @@ fun ChatScreen(
                 title = {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.clickable { showOptions = true }
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { showOptions = true }
+                            .padding(horizontal = 12.dp, vertical = 2.dp)
                     ) {
                         Text(
                             text = conversation?.title ?: Conversation.DEFAULT_TITLE,

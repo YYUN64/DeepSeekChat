@@ -32,8 +32,8 @@
 ### 方式一：GitHub Actions 直接拿 APK（不用装 Android Studio）
 
 1. 把本目录推到 GitHub 仓库（`.github/workflows/android.yml` 已包含）。
-2. 每次 push 到 `main` 都会自动构建；也可以在 **Actions → Build APK → Run workflow** 手动触发。
-3. 跑完在 Artifacts 里下载 `DeepSeekChat-debug`，解压得到 `app-debug.apk`，传到手机上安装（需允许「安装未知来源应用」）。
+2. 每次 push 到 `main` 都会自动构建（debug + release 都会产出）；也可以在 **Actions → Build APK → Run workflow** 手动触发。
+3. 跑完在 Artifacts 里下载 `DeepSeekChat-apk`，解压后按需安装 `app-release.apk`（推荐）或 `app-debug.apk`。
 
 > CI 里用的是 Google 官方 Maven 仓库；阿里云镜像只在本地环境（`CI` 环境变量为空时）优先使用。
 
@@ -50,9 +50,12 @@
 ```bash
 # 需要 JDK 17 + Android SDK（platform 34、build-tools 34.0.0）
 # Windows 用 gradlew.bat，macOS/Linux 用 ./gradlew
-./gradlew :app:assembleDebug
-# 产物：app/build/outputs/apk/debug/app-debug.apk
+
+./gradlew :app:assembleDebug     # 调试包：app/build/outputs/apk/debug/app-debug.apk
+./gradlew :app:assembleRelease   # 发布包：app/build/outputs/apk/release/app-release.apk
 ```
+
+> **日常请用 release 包**：开了 R8 压缩/混淆，体积 1.5 MB、冷启动 ~0.36 s；debug 包因为要保留调试信息且不做 AOT，冷启动约 2 s。release 用 debug keystore 签名，可以直接安装（不适合上架分发）。
 
 首次构建需要能访问 Google Maven / Maven Central（`settings.gradle.kts` 已优先使用阿里云镜像）。`sdk.dir` 由 `local.properties` 指定，Android Studio 会自动生成。
 

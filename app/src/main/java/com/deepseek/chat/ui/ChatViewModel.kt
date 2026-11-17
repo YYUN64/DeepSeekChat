@@ -72,7 +72,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         val settings = settingsStore.load()
-        val metas = chatStore.list()
         // 冷启动一律从新会话开始（历史仍在抽屉里）。进程存活期间的返回不受影响。
         val fresh = Conversation(
             id = UUID.randomUUID().toString(),
@@ -80,9 +79,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             thinking = settings.thinking,
             effort = settings.effort
         )
-        _state.update {
-            it.copy(settings = settings, conversations = metas, conversation = fresh)
-        }
+        _state.update { it.copy(settings = settings, conversation = fresh) }
+        // 历史列表等打开抽屉时再读（见 loadHistory），启动阶段不碰磁盘
+    }
+
+    /** 打开历史抽屉时调用：懒加载会话列表 */
+    fun loadHistory() {
+        refreshConversations()
     }
 
     // ---------------------------------------------------------------- 图片
