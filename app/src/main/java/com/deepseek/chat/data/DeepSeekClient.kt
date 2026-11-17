@@ -18,7 +18,11 @@ class ApiException(message: String, val statusCode: Int = 0) : Exception(message
 
 data class StreamResult(
     val usage: Usage?,
-    val finishReason: String?
+    val finishReason: String?,
+    /** 引用来源（JSON 数组字符串） */
+    val annotations: String? = null,
+    /** 服务端 Web 工具调用块（JSON 数组字符串，需要原样回传） */
+    val serverToolCalls: String? = null
 )
 
 /**
@@ -90,6 +94,8 @@ class DeepSeekClient(private val images: ImageStore) {
 
             var usage: Usage? = null
             var finishReason: String? = null
+            val annotations = JSONArray()
+            val serverToolCalls = JSONArray()
             BufferedReader(InputStreamReader(input, Charsets.UTF_8)).use { reader ->
                 while (true) {
                     val line = reader.readLine() ?: break
@@ -101,6 +107,9 @@ class DeepSeekClient(private val images: ImageStore) {
 
                     val chunk = runCatching { JSONObject(data) }.getOrNull() ?: continue
                     chunk.optJSONObject("usage")?.let { usage = parseUsage(it) }
+                    // Web 工具的引用与调用块可能挂在顶层、delta 或 message 上，三处都收
+                    collectInto(annotations, chunk.optJSONArray("annotations"))
+                    collectInto(serverToolCalls, chunk.optJSONArray("server_tool_calls"))
 
                     val choices = chunk.optJSONArray("choices") ?: continue
                     if (choices.length() == 0) continue
@@ -109,8 +118,14 @@ class DeepSeekClient(private val images: ImageStore) {
                         val finish = choice.optString("finish_reason")
                         if (finish.isNotBlank()) finishReason = finish
                     }
+                    choice.optJSONObject("message")?.let { message ->
+                        collectInto(annotations, message.optJSONArray("annotations"))
+                        collectInto(serverToolCalls, message.optJSONArray("server_tool_calls"))
+                    }
 
                     val delta = choice.optJSONObject("delta") ?: continue
+                    collectInto(annotations, delta.optJSONArray("annotations"))
+                    collectInto(serverToolCalls, delta.optJSONArray("server_tool_calls"))
                     // 注意：思考阶段的 content 是 JSON null，optString 会返回字符串 "null"，
                     // 必须先用 isNull 判断，否则正文里会混进一堆 "null"
                     if (!delta.isNull("reasoning_content")) {
@@ -123,7 +138,12 @@ class DeepSeekClient(private val images: ImageStore) {
                     }
                 }
             }
-            StreamResult(usage, finishReason)
+            StreamResult(
+                usage = usage,
+                finishReason = finishReason,
+                annotations = annotations.takeIf { it.length() > 0 }?.toString(),
+                serverToolCalls = serverToolCalls.takeIf { it.length() > 0 }?.toString()
+            )
         } catch (e: IOException) {
             if (!currentCoroutineContext().isActive) throw CancellationException("请求已取消")
             throw ApiException(friendlyIoMessage(e.message), 0)
@@ -148,10 +168,11 @@ class DeepSeekClient(private val images: ImageStore) {
             messages.put(JSONObject().put("role", "system").put("content", systemPrompt.trim()))
         }
         val supportsVision = Models.supportsVision(model)
+        val withTools = settings.webTools
         for (msg in history) {
             // 只有思考内容、没有正文的 assistant 消息会让接口报 400，直接跳过
             if (msg.role == Role.ASSISTANT && msg.text.isBlank()) continue
-            messages.put(messageToJson(msg, supportsVision, imageBudget))
+            messages.put(messageToJson(msg, supportsVision, withTools, imageBudget))
         }
         val payload = JSONObject()
             .put("model", model)
@@ -159,6 +180,15 @@ class DeepSeekClient(private val images: ImageStore) {
             .put("stream", true)
             .put("stream_options", JSONObject().put("include_usage", true))
             .put("max_tokens", settings.maxOutputTokens)
+        if (withTools) {
+            // 服务端执行的 Web 工具：搜索 / 打开网页都在 DeepSeek 侧完成，客户端不执行工具
+            payload.put(
+                "tools",
+                JSONArray()
+                    .put(JSONObject().put("type", "deepseek_web_search").put("name", "deepseek_web_search"))
+                    .put(JSONObject().put("type", "deepseek_read_url").put("name", "deepseek_read_url"))
+            )
+        }
         if (thinking) {
             payload.put("thinking", JSONObject().put("type", "enabled"))
             payload.put("reasoning_effort", Reasoning.effortFor(effort))
@@ -168,8 +198,21 @@ class DeepSeekClient(private val images: ImageStore) {
         return payload
     }
 
-    private fun messageToJson(msg: Msg, supportsVision: Boolean, imageBudget: LongArray): JSONObject {
+    private fun messageToJson(
+        msg: Msg,
+        supportsVision: Boolean,
+        withTools: Boolean,
+        imageBudget: LongArray
+    ): JSONObject {
         val json = JSONObject().put("role", msg.role.wire)
+        if (msg.role == Role.ASSISTANT && withTools) {
+            // 带 tools 时，历史里的思考内容必须原样回传，否则 400
+            if (msg.reasoning.isNotBlank()) json.put("reasoning_content", msg.reasoning)
+            // 服务端工具调用块（含 kind/signature）也要原样带回，否则读过的网页会丢
+            msg.serverToolCalls?.let { raw ->
+                runCatching { json.put("server_tool_calls", JSONArray(raw)) }
+            }
+        }
         if (msg.role == Role.USER && msg.images.isNotEmpty() && supportsVision) {
             val parts = JSONArray()
             if (msg.text.isNotBlank()) {
@@ -203,8 +246,16 @@ class DeepSeekClient(private val images: ImageStore) {
         return json
     }
 
-    private fun parseUsage(json: JSONObject): Usage = Usage(
-        promptTokens = json.optInt("prompt_tokens", 0),
+    /** 把 chunk 里出现的数组元素追加到收集器（引用、服务端工具调用） */
+    private fun collectInto(target: JSONArray, source: JSONArray?) {
+        if (source == null) return
+        for (index in 0 until source.length()) {
+            val item = source.opt(index)
+            if (item != null) target.put(item)
+        }
+    }
+
+    private fun parseUsage(json: JSONObject): Usage = Usage(        promptTokens = json.optInt("prompt_tokens", 0),
         completionTokens = json.optInt("completion_tokens", 0),
         totalTokens = json.optInt("total_tokens", 0),
         reasoningTokens = json.optJSONObject("completion_tokens_details")

@@ -37,7 +37,11 @@ data class Msg(
     val createdAt: Long = System.currentTimeMillis(),
     val usage: Usage? = null,
     val error: String? = null,
-    val model: String? = null
+    val model: String? = null,
+    /** 服务端 Web 工具调用块（原样回传用），存 JSON 数组字符串 */
+    val serverToolCalls: String? = null,
+    /** 引用来源（annotations），存 JSON 数组字符串 */
+    val annotations: String? = null
 )
 
 data class Conversation(

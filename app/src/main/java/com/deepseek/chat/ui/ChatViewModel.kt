@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.deepseek.chat.data.ApiException
 import com.deepseek.chat.data.ChatStore
 import com.deepseek.chat.data.Conversation
 import com.deepseek.chat.data.ConversationMeta
@@ -348,10 +349,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         job = viewModelScope.launch {
             var failure: String? = null
             var usage: Usage? = null
+            var citations: String? = null
+            var toolCalls: String? = null
             var cancelled = false
             try {
-                val result = client.streamChat(
-                    settings = settings,
+                suspend fun attempt(webTools: Boolean) = client.streamChat(
+                    settings = if (webTools) settings else settings.copy(webTools = false),
                     model = effectiveModel,
                     thinking = conversation.thinking,
                     effort = conversation.effort,
@@ -366,7 +369,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         _state.update { it.copy(streamText = content.toString()) }
                     }
                 )
+                val result = try {
+                    attempt(settings.webTools)
+                } catch (e: ApiException) {
+                    // 带服务端工具被拒（参数/兼容性问题）时，退回普通请求，保证还能聊
+                    if (settings.webTools && e.statusCode == 400) {
+                        _state.update { it.copy(notice = "联网工具请求被拒绝，已退回普通对话") }
+                        attempt(false)
+                    } else {
+                        throw e
+                    }
+                }
                 usage = result.usage
+                citations = result.annotations
+                toolCalls = result.serverToolCalls
             } catch (e: CancellationException) {
                 cancelled = true
             } catch (e: Exception) {
@@ -398,7 +414,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 reasoning = thought,
                 usage = usage,
                 error = failure,
-                model = effectiveModel
+                model = effectiveModel,
+                serverToolCalls = toolCalls,
+                annotations = citations
             )
             val latest = _state.value.conversation
             if (latest == null || latest.id != conversation.id) {

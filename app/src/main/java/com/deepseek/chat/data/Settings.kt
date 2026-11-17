@@ -11,7 +11,9 @@ data class Settings(
     val contextTokens: Int = 131_072,
     val maxOutputTokens: Int = 8_192,
     val systemPrompt: String = "",
-    val theme: String = ThemeMode.SYSTEM
+    val theme: String = ThemeMode.SYSTEM,
+    /** 声明服务端 Web 工具（deepseek_web_search / deepseek_read_url），默认开启 */
+    val webTools: Boolean = true
 ) {
     val hasKey: Boolean get() = apiKey.isNotBlank()
 
@@ -35,7 +37,8 @@ class SettingsStore(context: Context) {
         contextTokens = prefs.getInt(KEY_CONTEXT, 131_072),
         maxOutputTokens = prefs.getInt(KEY_OUTPUT, 8_192),
         systemPrompt = prefs.getString(KEY_SYSTEM_PROMPT, "").orEmpty(),
-        theme = ThemeMode.normalize(prefs.getString(KEY_THEME, ThemeMode.SYSTEM).orEmpty())
+        theme = ThemeMode.normalize(prefs.getString(KEY_THEME, ThemeMode.SYSTEM).orEmpty()),
+        webTools = prefs.getBoolean(KEY_WEB_TOOLS, true)
     )
 
     fun save(settings: Settings) {
@@ -49,6 +52,7 @@ class SettingsStore(context: Context) {
             .putInt(KEY_OUTPUT, settings.maxOutputTokens)
             .putString(KEY_SYSTEM_PROMPT, settings.systemPrompt)
             .putString(KEY_THEME, settings.theme)
+            .putBoolean(KEY_WEB_TOOLS, settings.webTools)
             .apply()
     }
 
@@ -62,5 +66,6 @@ class SettingsStore(context: Context) {
         const val KEY_OUTPUT = "max_output_tokens"
         const val KEY_SYSTEM_PROMPT = "system_prompt"
         const val KEY_THEME = "theme"
+        const val KEY_WEB_TOOLS = "web_tools"
     }
 }

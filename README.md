@@ -17,6 +17,7 @@
 | 能力 | 说明 |
 | --- | --- |
 | 图片上传 | 从相册选图，自动缩放（最长边 1600px）并按 EXIF 旋转，以 base64 内联发送；使用 `deepseek-flash` 的原生视觉能力（支持 JPEG/PNG/GIF/WebP） |
+| 联网 | 声明服务端工具 `deepseek_web_search` + `deepseek_read_url`：模型自己决定是否搜索、是否读取消息里的链接，搜索和抓取都在 DeepSeek 服务端完成；回答下方展示「参考来源」。设置里可关闭（默认开），搜索/抓取按次计费 |
 | 思考深度 | 四档「推理等级」：关闭 / 低 / 高 / 极致（与 DeepSeek Harness 的 off/low/high/max 一致）；思考过程以可折叠面板展示，流式输出 |
 | 会话历史 | 每个会话一个 JSON 文件，自动命名、重命名、删除、清空；重启后自动恢复最近会话 |
 | 上下文长度 | 16K / 32K / 64K / 128K / 256K / 512K / 1M 可选，超出预算自动丢弃最早的对话；顶栏实时显示估算用量 |
@@ -76,6 +77,7 @@
 | 最大回复长度 | `max_tokens`（1 ~ 393216） |
 | 系统提示词 | `messages` 开头的 `system` 消息 |
 | 图片 | 用户消息 `content` 数组里的 `image_url`（`data:image/jpeg;base64,...`，`detail: high`） |
+| 联网开关 | `tools` 里声明 `deepseek_web_search` / `deepseek_read_url`；带 tools 时历史 assistant 消息会回传 `reasoning_content` 与 `server_tool_calls` |
 
 注意：`deepseek-v4-pro` 不支持图片，带图片的消息会自动改用 `deepseek-flash` 发送（气泡上会标注实际使用的模型）。`deepseek-flash` 支持 1M 上下文、Vision 与思考模式。
 

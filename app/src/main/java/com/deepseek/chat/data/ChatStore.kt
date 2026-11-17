@@ -117,6 +117,8 @@ class ChatStore(root: File) {
             .put("images", images)
         if (msg.error != null) json.put("error", msg.error)
         if (msg.model != null) json.put("model", msg.model)
+        if (msg.serverToolCalls != null) json.put("serverToolCalls", msg.serverToolCalls)
+        if (msg.annotations != null) json.put("annotations", msg.annotations)
         val usage = msg.usage
         if (usage != null) {
             json.put(
@@ -168,7 +170,9 @@ class ChatStore(root: File) {
             createdAt = json.optLong("createdAt", 0L),
             usage = usage,
             error = json.optString("error").takeIf { it.isNotBlank() },
-            model = json.optString("model").takeIf { it.isNotBlank() }
+            model = json.optString("model").takeIf { it.isNotBlank() },
+            serverToolCalls = json.optString("serverToolCalls").takeIf { it.isNotBlank() },
+            annotations = json.optString("annotations").takeIf { it.isNotBlank() }
         )
     }
 }

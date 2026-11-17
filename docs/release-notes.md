@@ -3,6 +3,7 @@
 ## 功能
 
 - 图片上传（`deepseek-flash` 原生视觉，自动缩放 / EXIF 转正 / 请求体积上限）
+- 联网（默认开）：服务端 `deepseek_web_search` / `deepseek_read_url`，自动搜索或读取消息里的链接，回答下方附「参考来源」；搜索/抓取按次计费，可在设置里关闭
 - 推理等级：关闭 / 低 / 高 / 极致（对齐 DeepSeek Harness 的 off/low/high/max）
 - 会话历史：本地 JSON 存储，左侧抽屉切换，冷启动默认开新会话
 - 上下文长度 / 最大回复长度可调（16K ~ 1M / 4K ~ 384K）

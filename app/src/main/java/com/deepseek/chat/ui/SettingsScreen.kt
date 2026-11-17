@@ -193,6 +193,15 @@ fun SettingsScreen(
                 )
             }
 
+            SettingSection("联网") {
+                SwitchRow(
+                    label = "联网搜索",
+                    description = "由 DeepSeek 服务端执行搜索与网页读取，按次计费",
+                    checked = settings.webTools,
+                    onCheckedChange = { onChange(settings.copy(webTools = it)) }
+                )
+            }
+
             SettingSection("外观") {
                 Row(
                     modifier = Modifier

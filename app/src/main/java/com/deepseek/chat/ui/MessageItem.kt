@@ -38,13 +38,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.deepseek.chat.data.ImageRef
 import com.deepseek.chat.data.Models
 import com.deepseek.chat.data.Msg
 import com.deepseek.chat.data.Role
+import org.json.JSONArray
 
 @Composable
 fun MessageItem(
@@ -104,6 +107,7 @@ private fun UserMessage(
 @Composable
 private fun AssistantMessage(msg: Msg, streaming: Boolean, onRegenerate: (() -> Unit)?) {
     val clipboard = LocalClipboardManager.current
+    val uriHandler = LocalUriHandler.current
     var expanded by remember(msg.id) { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -156,6 +160,40 @@ private fun AssistantMessage(msg: Msg, streaming: Boolean, onRegenerate: (() -> 
             )
         }
 
+        val sources = remember(msg.annotations) { parseSources(msg.annotations) }
+        if (sources.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = "参考来源",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            for ((title, url) in sources.take(8)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { uriHandler.openUri(url) }
+                        .padding(vertical = 3.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Text(
+                        text = "·",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 6.dp)
+                    )
+                }
+            }
+        }
+
         if (!streaming) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -204,8 +242,7 @@ private fun AssistantMessage(msg: Msg, streaming: Boolean, onRegenerate: (() -> 
 }
 
 @Composable
-private fun ReasoningPanel(
-    text: String,
+private fun ReasoningPanel(    text: String,
     streaming: Boolean,
     expanded: Boolean,
     onToggle: () -> Unit
@@ -251,4 +288,25 @@ private fun ReasoningPanel(
             }
         }
     }
+}
+
+/**
+ * 从 annotations 里取出引用来源 (标题, URL)，按 URL 去重。
+ * 兼容两种形状：`{"url":..,"title":..}` 与 OpenAI 风格的 `{"url_citation":{...}}`。
+ */
+private fun parseSources(raw: String?): List<Pair<String, String>> {
+    if (raw.isNullOrBlank()) return emptyList()
+    val found = LinkedHashMap<String, String>()
+    runCatching {
+        val array = JSONArray(raw)
+        for (index in 0 until array.length()) {
+            val item = array.optJSONObject(index) ?: continue
+            val citation = item.optJSONObject("url_citation") ?: item
+            val url = citation.optString("url").trim()
+            if (url.isEmpty()) continue
+            val title = citation.optString("title").trim().ifEmpty { url }
+            found.putIfAbsent(url, title)
+        }
+    }
+    return found.map { (url, title) -> title to url }
 }
