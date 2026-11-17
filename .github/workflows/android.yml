@@ -3,6 +3,7 @@ name: Build APK
 on:
   push:
     branches: [ main, master ]
+    tags: [ 'v*' ]
   pull_request:
   workflow_dispatch:
 
@@ -58,3 +59,30 @@ jobs:
             app/build/outputs/apk/debug/*.apk
             app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+
+      # 推 v* 标签时自动建 Release 并附上两个 APK
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk "DeepSeekLite-${GITHUB_REF_NAME}.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "DeepSeekLite-${GITHUB_REF_NAME}-debug.apk"
+          gh release create "${GITHUB_REF_NAME}" \
+            "DeepSeekLite-${GITHUB_REF_NAME}.apk" \
+            "DeepSeekLite-${GITHUB_REF_NAME}-debug.apk" \
+            --title "DeepSeek Lite ${GITHUB_REF_NAME}" \
+            --notes "个人自用的 DeepSeek 安卓客户端，直连官方 API。
+
+## 功能
+- 图片上传（deepseek-flash 原生视觉）
+- 推理等级 关闭 / 低 / 高 / 极致（对齐 DSH 的 off/low/high/max）
+- 会话历史（本地 JSON，抽屉切换）
+- 上下文长度 / 最大回复长度可调（16K~1M）
+- 流式输出、思考过程折叠、Markdown、深色/浅色主题
+
+## 安装
+- \`DeepSeekLite-${GITHUB_REF_NAME}.apk\`：release 包，R8 优化，冷启动约 0.36 s（推荐）
+- \`DeepSeekLite-${GITHUB_REF_NAME}-debug.apk\`：调试包，体积大、启动慢，仅用于排查
+
+包名 \`io.github.yyun64.deepseekchat\`，可与官方 DeepSeek App 共存。release 包使用 debug keystore 签名，仅供个人侧载。"
