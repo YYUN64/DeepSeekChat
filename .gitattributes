@@ -1,0 +1,11 @@
+# 统一换行符，避免 Windows 上提交时产生整file diff
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.jar binary
+*.keystore binary
+*.png binary
+*.jpg binary
+*.webp binary
+*.apk binary
