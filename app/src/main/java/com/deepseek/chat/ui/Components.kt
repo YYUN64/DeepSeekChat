@@ -113,14 +113,18 @@ fun ImagePreviewDialog(
 @Composable
 fun SelectableChip(label: String, selected: Boolean, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(18.dp)
     Surface(
         color = if (selected) colors.primaryContainer else colors.surfaceVariant,
-        shape = RoundedCornerShape(18.dp),
+        shape = shape,
         border = BorderStroke(
             1.dp,
             if (selected) colors.primary else colors.outlineVariant
         ),
-        modifier = Modifier.clickable { onClick() }
+        // 先裁剪再 clickable，水波纹才会被限制在圆角内（否则是方形并溢出）
+        modifier = Modifier
+            .clip(shape)
+            .clickable { onClick() }
     ) {
         Text(
             text = label,
@@ -168,8 +172,9 @@ fun ChoiceRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
             .clickable(enabled = enabled) { onClick() }
-            .padding(vertical = 14.dp),
+            .padding(horizontal = 4.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
@@ -202,8 +207,9 @@ fun SwitchRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
             .clickable { onCheckedChange(!checked) }
-            .padding(vertical = 12.dp),
+            .padding(horizontal = 4.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
@@ -237,6 +243,7 @@ fun OptionDialog(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
                             .clickable {
                                 onSelect(option.first)
                                 onDismiss()

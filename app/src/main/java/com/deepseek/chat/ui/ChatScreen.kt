@@ -359,6 +359,7 @@ private fun ConversationOptionsDialog(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
                             .clickable { onSetModel(item) }
                             .padding(vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
