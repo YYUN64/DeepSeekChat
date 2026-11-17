@@ -5,7 +5,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,8 +48,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -69,7 +69,8 @@ import com.deepseek.chat.data.Models
 import com.deepseek.chat.data.Msg
 import com.deepseek.chat.data.Role
 import com.deepseek.chat.data.TokenCounter
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -120,31 +121,38 @@ fun ChatScreen(
         append(ContextLimits.label(state.settings.contextTokens))
     }
 
-    val itemCount = messages.size + if (state.streaming) 1 else 0
-    val scope = rememberCoroutineScope()
-    // 只有用户自己滚动到底部之后才继续跟随；往上看历史时不再把他拽回去
+    // 只有用户停在底部时才跟随；手动往上翻之后不再强行拽回
     var followBottom by remember { mutableStateOf(true) }
+    val latestState = rememberUpdatedState(state)
     LaunchedEffect(listState) {
-        listState.interactionSource.interactions.collect { interaction ->
-            if (interaction is DragInteraction.Stop || interaction is DragInteraction.Cancel) {
-                followBottom = !listState.canScrollForward
+        // 拖动/惯性滚动结束后重新判断是否贴底：往上翻就停止跟随，自己滚回底部再恢复。
+        // 只处理真正的滚动结束（跳过首次组合时的 false），避免刚打开会话就被判成"用户翻上去了"
+        var wasScrolling = false
+        snapshotFlow { listState.isScrollInProgress }
+            .distinctUntilChanged()
+            .collect { scrolling ->
+                if (wasScrolling && !scrolling) followBottom = !listState.canScrollForward
+                wasScrolling = scrolling
             }
-        }
     }
     LaunchedEffect(messages.size) { followBottom = true }
-    LaunchedEffect(
-        itemCount,
-        state.streamText.length / 40,
-        // 思考阶段没有正文，只有思考内容在长：也要跟随，否则内容会往屏幕下方跑出去
-        state.streamReasoning.length / 40
-    ) {
-        if (itemCount > 0 && followBottom) {
-            // 先定位到最后一条，再用 scrollBy 滚到真正的底部。
-            // 不用超大的 scrollToItem 偏移量：那会让偏移长期越界，每帧被夹紧，
-            // 展开思考面板或内容增长时就会抖。
-            listState.scrollToItem(itemCount - 1)
-            listState.scrollBy(1_000_000f)
+    LaunchedEffect(listState) {
+        // 每次流式内容更新后只做一次「滚到真正的底部」。
+        // 不用 scrollToItem(last) 归位：那会先把长条目顶到视口顶部、再滚回底部，
+        // 两步之间只要渲染出一帧就是一次上下跳；这里一次 scrollBy 直接夹到底部。
+        snapshotFlow {
+            Triple(
+                latestState.value.conversation?.messages?.size ?: 0,
+                latestState.value.streamText.length,
+                latestState.value.streamReasoning.length
+            )
         }
+            .conflate()
+            .collect {
+                if (followBottom && !listState.isScrollInProgress) {
+                    listState.scrollBy(1_000_000f)
+                }
+            }
     }
     LaunchedEffect(state.notice) {
         val notice = state.notice
@@ -267,20 +275,7 @@ fun ChatScreen(
                         streaming = true,
                         imageLoader = imageLoader,
                         onRegenerate = null,
-                        onImageClick = {},
-                        // 展开思考面板时：停止自动跟随，并把滚动位置归位到合法范围。
-                        // 跟随用的是超出底部的超大偏移量，展开动画改变条目高度时每帧都会被夹紧，
-                        // 和动画互相拉扯，表现就是持续上下抽搐。
-                        onReasoningToggle = {
-                            followBottom = false
-                            if (state.streaming) {
-                                scope.launch {
-                                    if (itemCount > 0) {
-                                        listState.scrollToItem(itemCount - 1, 0)
-                                    }
-                                }
-                            }
-                        }
+                        onImageClick = {}
                     )
                 }
             }

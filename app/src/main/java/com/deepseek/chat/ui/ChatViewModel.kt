@@ -24,6 +24,7 @@ import com.deepseek.chat.data.Usage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -67,6 +68,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 请求轮次：取消/切换后用来丢弃过期回合的回写 */
     private var round = 0
+
+    /** 本轮流式输出的检查点消息 id：进程被杀前留底用，正常结束会被完整消息覆盖 */
+    private var checkpointId = ""
+
+    /** 流式文本推给 UI 的节流时间戳（~12Hz），避免每个 delta 都整页重组 */
+    private var lastStreamPush = 0L
 
     /** 输入会话令牌：发消息之后才导入完成的图片不应再挂到输入框上 */
     private var inputSession = 0
@@ -185,6 +192,37 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // 让还在跑的那次请求作废，避免它结束后再补一条重复消息
         round++
         _state.update { it.copy(conversation = updated, streaming = false, streamText = "", streamReasoning = "") }
+    }
+
+    /**
+     * 把正在流式输出的内容落盘，但不打断这次生成。
+     *
+     * 用于 Activity 进入后台 / 进程可能被系统回收时留底：否则思考过程只存在于内存，
+     * 进程一死回来就只剩用户提问。正常生成结束后会用完整消息覆盖同一个 id。
+     */
+    fun saveStreamingCheckpoint() {
+        val snapshot = _state.value
+        val conversation = snapshot.conversation ?: return
+        if (!snapshot.streaming) return
+        if (snapshot.streamText.isBlank() && snapshot.streamReasoning.isBlank()) return
+        val id = checkpointId.ifBlank { return }
+        val partial = Msg(
+            id = id,
+            role = Role.ASSISTANT,
+            text = snapshot.streamText,
+            reasoning = snapshot.streamReasoning,
+            error = "已停止"
+        )
+        // 同一轮里重复进入后台只留一条检查点
+        val messages = conversation.messages.filterNot { it.id == id } + partial
+        runCatching {
+            chatStore.save(
+                conversation.copy(
+                    messages = messages,
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
+        }
     }
 
     fun openConversation(id: String) {
@@ -379,6 +417,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val content = StringBuilder()
         val reasoning = StringBuilder()
         val myRound = ++round
+        checkpointId = UUID.randomUUID().toString()
+        lastStreamPush = 0L
 
         job = viewModelScope.launch {
             var failure: String? = null
@@ -434,11 +474,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             functionTools = functionTools,
                             onReasoning = { delta ->
                                 reasoning.append(delta)
-                                _state.update { it.copy(streamReasoning = reasoning.toString()) }
+                                publishStream(reasoning = reasoning.toString())
                             },
                             onContent = { delta ->
                                 content.append(delta)
-                                _state.update { it.copy(streamText = content.toString()) }
+                                publishStream(content = content.toString())
                             }
                         )
                     } catch (e: ApiException) {
@@ -538,7 +578,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 // 用户已经切到别的会话：把结果写回文件，不动当前界面状态
                 val stored = chatStore.load(conversation.id)
                 if (stored != null) {
-                    withContext(Dispatchers.IO) {
+                    // 用户点过“停止”时本协程已被取消：落盘必须放在 NonCancellable 里，
+                    // 否则 withContext 会直接抛 CancellationException，界面上有、磁盘上没有
+                    withContext(NonCancellable + Dispatchers.IO) {
                         chatStore.save(
                             stored.copy(
                                 messages = stored.messages + assistant,
@@ -568,12 +610,31 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     error = null
                 )
             }
-            withContext(Dispatchers.IO) { chatStore.save(withAnswer) }
+            withContext(NonCancellable + Dispatchers.IO) { chatStore.save(withAnswer) }
             refreshConversations()
         }
     }
 
+    /**
+     * 流式文本节流后再推给 UI（~12Hz）。
+     * 服务端 delta 每秒可能几十个，每个都 setState 会让整页（含 token 估算、顶栏小字）
+     * 跟着重组，跟随滚动的节奏也会变得忽快忽慢。
+     */
+    private fun publishStream(reasoning: String? = null, content: String? = null) {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastStreamPush < STREAM_PUSH_INTERVAL_MS) return
+        lastStreamPush = now
+        _state.update {
+            it.copy(
+                streamReasoning = reasoning ?: it.streamReasoning,
+                streamText = content ?: it.streamText
+            )
+        }
+    }
+
     override fun onCleared() {
+        // Activity 直接销毁（返回键退出等）时兜底留一份思考过程
+        saveStreamingCheckpoint()
         client.cancel()
         job?.cancel()
         job = null
@@ -702,5 +763,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         const val MAX_IMAGES = 6
         const val MAX_TOOL_ROUNDS = 4
         const val MAX_TOOL_OUTPUT = 8000
+
+        /** 流式文本推给 UI 的最小间隔 */
+        const val STREAM_PUSH_INTERVAL_MS = 80L
     }
 }

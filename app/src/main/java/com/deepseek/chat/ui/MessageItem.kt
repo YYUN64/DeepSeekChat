@@ -11,8 +11,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -30,7 +28,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -58,13 +55,12 @@ fun MessageItem(
     streaming: Boolean,
     imageLoader: (ImageRef, Int) -> android.graphics.Bitmap?,
     onRegenerate: (() -> Unit)?,
-    onImageClick: (ImageRef) -> Unit,
-    onReasoningToggle: (() -> Unit)? = null
+    onImageClick: (ImageRef) -> Unit
 ) {
     if (msg.role == Role.USER) {
         UserMessage(msg, imageLoader, onImageClick)
     } else {
-        AssistantMessage(msg, streaming, onRegenerate, onReasoningToggle)
+        AssistantMessage(msg, streaming, onRegenerate)
     }
 }
 
@@ -112,8 +108,7 @@ private fun UserMessage(
 private fun AssistantMessage(
     msg: Msg,
     streaming: Boolean,
-    onRegenerate: (() -> Unit)?,
-    onReasoningToggle: (() -> Unit)?
+    onRegenerate: (() -> Unit)?
 ) {
     val clipboard = LocalClipboardManager.current
     val uriHandler = LocalUriHandler.current
@@ -125,10 +120,7 @@ private fun AssistantMessage(
                 text = msg.reasoning,
                 streaming = streaming,
                 expanded = expanded,
-                onToggle = {
-                expanded = !expanded
-                onReasoningToggle?.invoke()
-            }
+                onToggle = { expanded = !expanded }
             )
             Spacer(modifier = Modifier.height(8.dp))
         }
@@ -260,14 +252,8 @@ private fun ReasoningPanel(
     expanded: Boolean,
     onToggle: () -> Unit
 ) {
-    // 固定最大高度 + 内部滚动 + 流式时自动跟到底部：
-    // 这样外层列表高度不再随思考内容增长而变化，不会出现整体跳动。
-    val reasoningScroll = rememberScrollState()
-    LaunchedEffect(expanded, streaming, text) {
-        if (expanded && streaming) {
-            reasoningScroll.scrollTo(reasoningScroll.maxValue)
-        }
-    }
+    // 面板高度随内容自然向下生长（不做固定高度、不做内部滚动），
+    // 跟随滚动只由外层的 LazyColumn 负责。
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,
         shape = RoundedCornerShape(12.dp),

@@ -13,8 +13,8 @@ android {
         applicationId = "io.github.yyun64.deepseekchat"
         minSdk = 26
         targetSdk = 34
-        versionCode = 9
-        versionName = "1.2.4"
+        versionCode = 10
+        versionName = "1.2.5"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -77,4 +77,6 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     testImplementation("junit:junit:4.13.2")
+    // JVM 单测里 android.jar 的 org.json 只是空壳，补一份真实现用于序列化往返测试
+    testImplementation("org.json:json:20240303")
 }

@@ -8,11 +8,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.deepseek.chat.data.ThemeMode
@@ -27,6 +31,17 @@ class MainActivity : ComponentActivity() {
         setContent {
             val vm: ChatViewModel = viewModel()
             val state by vm.state.collectAsStateWithLifecycle()
+
+            // 退到后台/退出前把还在流式输出的思考过程留一份到磁盘：
+            // 进程被系统回收后回来，历史里仍然能看到「已深度思考」。
+            val lifecycleOwner = LocalLifecycleOwner.current
+            DisposableEffect(lifecycleOwner, vm) {
+                val observer = LifecycleEventObserver { _, event ->
+                    if (event == Lifecycle.Event.ON_STOP) vm.saveStreamingCheckpoint()
+                }
+                lifecycleOwner.lifecycle.addObserver(observer)
+                onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+            }
 
             val darkTheme = when (state.settings.theme) {
                 ThemeMode.LIGHT -> false
