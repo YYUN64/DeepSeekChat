@@ -386,10 +386,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val requestMessages = history.toMutableList()
             var rounds = 0
             var webFallback = false
+            // 已显示的内容只追加不清空：模型先说话、再调用工具时，前面的文字必须留在屏幕上
+            var contentStart = 0
+            var reasoningStart = 0
             try {
                 while (true) {
-                    content.setLength(0)
-                    reasoning.setLength(0)
+                    contentStart = content.length
+                    reasoningStart = reasoning.length
                     val result = try {
                         client.streamChat(
                             settings = settings,
@@ -433,12 +436,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         break
                     }
                     rounds++
-                    // 把带 tool_calls 的 assistant 轮次和工具结果接进上下文，再请求一次
+                    // 把带 tool_calls 的 assistant 轮次和工具结果接进上下文，再请求一次。
+                    // 注意：只取本轮新增的部分，之前的文字留在屏幕上、不重复发给模型。
                     requestMessages += Msg(
                         id = UUID.randomUUID().toString(),
                         role = Role.ASSISTANT,
-                        text = content.toString(),
-                        reasoning = reasoning.toString(),
+                        text = content.substring(contentStart),
+                        reasoning = reasoning.substring(reasoningStart),
                         toolCallsJson = calls,
                         model = effectiveModel
                     )

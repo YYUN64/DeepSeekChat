@@ -3,6 +3,7 @@
 ## 功能
 
 - 图片上传（`deepseek-flash` 原生视觉，自动缩放 / EXIF 转正 / 请求体积上限）
+- 修复：MCP 工具调用时，模型「先说一句再调用工具」的场合，已经显示的正文会被清空重来（现在只追加，不再重置）
 - 联网（默认开）：服务端 `deepseek_web_search` / `deepseek_read_url`，自动搜索或读取消息里的链接，回答下方附「参考来源」；搜索/抓取按次计费，可在设置里关闭
 - 时间感知：每条用户消息前带一条 DeepSeek `latest_reminder`（`日期,星期,时区,App,中文`），模型每轮都知道今天几号；由消息创建时间推导，历史回传一致，不破坏上下文缓存
 - 远程 MCP（默认关）：设置里填服务器 IPv4 + 端口，App 作为 MCP 客户端握手、拉工具列表并交给模型调用（最多 4 轮），可用「测试连接」自检；开启时「联网」服务端工具自动让位（DeepSeek 不允许同时声明）。配套服务器已拆分为独立仓库 [pocket-mcp](https://github.com/YYUN64/pocket-mcp)：单文件、纯标准库、8 个工具，Linux 一条 `sudo ./install.sh` 装成非 root 用户 + systemd 沙箱，Windows 双击 `run-windows.bat` 即可
