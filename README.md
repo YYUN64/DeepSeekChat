@@ -37,15 +37,18 @@
 2. 首次同步会自动下载 Gradle 8.7 与依赖（`settings.gradle.kts` 里已配置阿里云镜像，国内网络更稳）。
 3. 连接手机，点 ▶ 运行；或 **Build → Build App Bundle(s)/APK(s) → Build APK(s)**。
 
-> 仓库里没有提交 `gradle-wrapper.jar`（二进制），如果 Studio 提示 wrapper 缺失：在项目根目录装好 Gradle 8.7 后执行一次 `gradle wrapper --gradle-version 8.7`，或在 Studio 的 Gradle 设置里把 *Use Gradle from* 改成 **Specified location** 指向本机 Gradle。命令行构建和 Actions 构建都不需要 wrapper。
+> 仓库已包含 Gradle wrapper（`gradlew` / `gradlew.bat` / `gradle/wrapper/gradle-wrapper.jar`），Windows、macOS、Linux 都可直接用 wrapper 构建，无需另外安装 Gradle。
 
 ### 方式三：命令行
 
 ```bash
-# 需要 JDK 17、Android SDK（含 platform 34 与 build-tools）、Gradle 8.7
-gradle :app:assembleDebug
+# 需要 JDK 17 + Android SDK（platform 34、build-tools 34.0.0）
+# Windows 用 gradlew.bat，macOS/Linux 用 ./gradlew
+./gradlew :app:assembleDebug
 # 产物：app/build/outputs/apk/debug/app-debug.apk
 ```
+
+首次构建需要能访问 Google Maven / Maven Central（`settings.gradle.kts` 已优先使用阿里云镜像）。`sdk.dir` 由 `local.properties` 指定，Android Studio 会自动生成。
 
 ## 使用
 

@@ -18,10 +18,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.AddPhotoAlternate
 import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.Send
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -144,7 +144,7 @@ fun Composer(
                     )
                 } else {
                     Icon(
-                        imageVector = Icons.Outlined.Send,
+                        imageVector = Icons.AutoMirrored.Outlined.Send,
                         contentDescription = "发送",
                         modifier = Modifier.size(20.dp)
                     )
