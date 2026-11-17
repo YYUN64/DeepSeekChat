@@ -60,9 +60,42 @@ object TokenCounter {
         return picked.toList()
     }
 
+    /**
+     * 当前上下文占用。
+     *
+     * 参照 DSH token-meter 的做法：以服务端最近一次返回的 usage 为锚点
+     * （prompt + completion 就是那一轮请求的完整 token 数），锚点之后新增的
+     * 消息再用启发式估算补齐；还没有任何 usage 时才整套估算。
+     *
+     * @return tokens 与是否为估算值（false 表示含服务端实测数字）
+     */
+    fun contextUsage(messages: List<Msg>): ContextUsage {
+        if (messages.isEmpty()) return ContextUsage(0, estimated = true)
+        val anchor = messages.indexOfLast { it.usage != null }
+        if (anchor < 0) return ContextUsage(estimateAll(messages), estimated = true)
+
+        val usage = messages[anchor].usage ?: return ContextUsage(estimateAll(messages), estimated = true)
+        // prompt + completion 覆盖到这条 assistant 消息本身
+        var total = if (usage.totalTokens > 0) {
+            usage.totalTokens
+        } else {
+            usage.promptTokens + usage.completionTokens
+        }
+        // 锚点之后的新消息（例如刚发出的用户消息）还没有被服务端计费，用估算补
+        var estimatedTail = false
+        for (index in anchor + 1 until messages.size) {
+            total += estimateMessage(messages[index])
+            estimatedTail = true
+        }
+        return ContextUsage(total, estimated = estimatedTail)
+    }
+
     fun describe(tokens: Int): String = when {
         tokens >= 1_000_000 -> String.format(java.util.Locale.US, "%.1fM", tokens / 1_000_000f)
         tokens >= 1_000 -> String.format(java.util.Locale.US, "%.1fK", tokens / 1_000f)
         else -> "$tokens"
     }
 }
+
+/** 上下文占用量：tokens 总量，以及其中是否含有估算成分 */
+data class ContextUsage(val tokens: Int, val estimated: Boolean)

@@ -99,16 +99,19 @@ fun ChatScreen(
         conversation?.effort ?: state.settings.effort
     )
 
-    val historyTokens = remember(messages) { TokenCounter.estimateAll(messages) }
+    // 上下文占用：有服务端 usage 时以其为锚点，只有新增消息才用估算
+    val contextUsage = remember(messages) { TokenCounter.contextUsage(messages) }
     val streamTokens = remember(state.streamText, state.streamReasoning) {
         TokenCounter.estimate(state.streamText) + TokenCounter.estimate(state.streamReasoning)
     }
-    val usedTokens = historyTokens + streamTokens
+    val usedTokens = contextUsage.tokens + streamTokens
+    val usedEstimated = contextUsage.estimated || streamTokens > 0
     val subtitle = buildString {
         append(Models.label(model))
         append(" · ")
         append(if (level == Reasoning.OFF) "不推理" else "推理·${Reasoning.label(level)}")
         append(" · 上下文 ")
+        if (usedEstimated) append("≈")
         append(TokenCounter.describe(usedTokens))
         append(" / ")
         append(ContextLimits.label(state.settings.contextTokens))

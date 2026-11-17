@@ -109,5 +109,5 @@ app/src/main/java/com/deepseek/chat/
 - 数据全部在本机：设置存在 SharedPreferences，会话在 `files/chat/conversations/*.json`，图片在 `files/images/`。
 - 卸载 App 会一并删除这些数据；`allowBackup=false`，不会进云备份。
 - 思考模式下 `temperature` / `top_p` 基本无效（DeepSeek 的限制），所以没有做这两个滑杆。
-- 上下文用量是客户端估算（中文按 1 字 ≈ 1 token，其它字符 4 字符 ≈ 1 token，图片按 1024 token 计），和真实计费数字会有偏差，以回答下方服务端返回的 usage 为准。
+- 上下文用量：优先用服务端最近一次返回的 `usage` 做锚点（`prompt + completion` 即该轮完整 token），锚点之后新增的消息才用启发式估算补齐；还没有实测数据时整体走估算，此时界面显示 `≈`。启发式为中文按 1 字 ≈ 1 token、其它 4 字符 ≈ 1 token、每张图 1024 token，与真实计费有偏差，以回答下方的服务端 usage 为准。
 - `tools/` 下是开发期的自检脚本（括号配平、import 一致性、Markdown/SSE 解析逻辑的等价实现测试），跑 `node tools/check-brackets.js app/src/main/java` 即可，不参与 App 构建。
