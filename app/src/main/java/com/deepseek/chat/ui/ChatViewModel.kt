@@ -72,15 +72,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         val settings = settingsStore.load()
-        _state.update { it.copy(settings = settings) }
         val metas = chatStore.list()
-        _state.update { it.copy(conversations = metas) }
-        val first = metas.firstOrNull()
-        if (first != null) {
-            val conversation = chatStore.load(first.id)
-            if (conversation != null) {
-                _state.update { it.copy(conversation = conversation) }
-            }
+        // 冷启动一律从新会话开始（历史仍在抽屉里）。进程存活期间的返回不受影响。
+        val fresh = Conversation(
+            id = UUID.randomUUID().toString(),
+            model = settings.model,
+            thinking = settings.thinking,
+            effort = settings.effort
+        )
+        _state.update {
+            it.copy(settings = settings, conversations = metas, conversation = fresh)
         }
     }
 
