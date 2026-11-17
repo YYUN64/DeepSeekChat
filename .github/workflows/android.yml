@@ -10,6 +10,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # 创建 Release 需要写权限（仓库默认 token 是只读的）
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -68,8 +71,12 @@ jobs:
         run: |
           cp app/build/outputs/apk/release/app-release.apk "DeepSeekLite-${GITHUB_REF_NAME}.apk"
           cp app/build/outputs/apk/debug/app-debug.apk "DeepSeekLite-${GITHUB_REF_NAME}-debug.apk"
-          gh release create "${GITHUB_REF_NAME}" \
+          if ! out=$(gh release create "${GITHUB_REF_NAME}" \
             "DeepSeekLite-${GITHUB_REF_NAME}.apk" \
             "DeepSeekLite-${GITHUB_REF_NAME}-debug.apk" \
             --title "DeepSeek Lite ${GITHUB_REF_NAME}" \
-            --notes-file docs/release-notes.md
+            --notes-file docs/release-notes.md 2>&1); then
+            echo "::error title=gh release failed::$(echo "$out" | head -n 5 | tr '\n' '|' | cut -c1-600)"
+            exit 1
+          fi
+          echo "$out"
