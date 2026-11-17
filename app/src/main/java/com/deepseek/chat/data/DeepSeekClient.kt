@@ -111,10 +111,16 @@ class DeepSeekClient(private val images: ImageStore) {
                     }
 
                     val delta = choice.optJSONObject("delta") ?: continue
-                    val reasoning = delta.optString("reasoning_content")
-                    if (reasoning.isNotEmpty()) onReasoning(reasoning)
-                    val content = delta.optString("content")
-                    if (content.isNotEmpty()) onContent(content)
+                    // 注意：思考阶段的 content 是 JSON null，optString 会返回字符串 "null"，
+                    // 必须先用 isNull 判断，否则正文里会混进一堆 "null"
+                    if (!delta.isNull("reasoning_content")) {
+                        val reasoning = delta.optString("reasoning_content")
+                        if (reasoning.isNotEmpty()) onReasoning(reasoning)
+                    }
+                    if (!delta.isNull("content")) {
+                        val content = delta.optString("content")
+                        if (content.isNotEmpty()) onContent(content)
+                    }
                 }
             }
             StreamResult(usage, finishReason)
@@ -215,9 +221,10 @@ class DeepSeekClient(private val images: ImageStore) {
             (conn.errorStream ?: conn.inputStream)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
         }.getOrNull()
         val detail = raw?.let { body ->
-            runCatching { JSONObject(body).optJSONObject("error")?.optString("message") }
-                .getOrNull()
-                ?.takeIf { it.isNotBlank() }
+            runCatching {
+                val error = JSONObject(body).optJSONObject("error")
+                if (error == null || error.isNull("message")) null else error.optString("message")
+            }.getOrNull()?.takeIf { it.isNotBlank() }
                 ?: body.take(400)
         }
         val hint = when (code) {

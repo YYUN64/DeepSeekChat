@@ -9,7 +9,8 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.deepseek.chat"
+        // 官方 App 的包名就是 com.deepseek.chat，这里必须用不同的 applicationId 才能共存
+        applicationId = "io.github.yyun64.deepseekchat"
         minSdk = 26
         targetSdk = 34
         versionCode = 1
