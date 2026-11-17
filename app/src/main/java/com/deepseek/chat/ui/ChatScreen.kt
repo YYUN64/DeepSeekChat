@@ -105,7 +105,7 @@ fun ChatScreen(
         TokenCounter.estimate(state.streamText) + TokenCounter.estimate(state.streamReasoning)
     }
     val usedTokens = contextUsage.tokens + streamTokens
-    val usedEstimated = contextUsage.estimated || streamTokens > 0
+    val usedEstimated = usedTokens > 0 && (contextUsage.estimated || streamTokens > 0)
     val subtitle = buildString {
         append(Models.label(model))
         append(" · ")
