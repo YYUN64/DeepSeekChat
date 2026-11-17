@@ -13,7 +13,9 @@ data class Settings(
     val systemPrompt: String = "",
     val theme: String = ThemeMode.SYSTEM,
     /** 声明服务端 Web 工具（deepseek_web_search / deepseek_read_url），默认开启 */
-    val webTools: Boolean = true
+    val webTools: Boolean = true,
+    /** 远程 MCP 服务器地址（streamable HTTP），空表示不用 MCP */
+    val mcpUrl: String = ""
 ) {
     val hasKey: Boolean get() = apiKey.isNotBlank()
 
@@ -38,7 +40,8 @@ class SettingsStore(context: Context) {
         maxOutputTokens = prefs.getInt(KEY_OUTPUT, 8_192),
         systemPrompt = prefs.getString(KEY_SYSTEM_PROMPT, "").orEmpty(),
         theme = ThemeMode.normalize(prefs.getString(KEY_THEME, ThemeMode.SYSTEM).orEmpty()),
-        webTools = prefs.getBoolean(KEY_WEB_TOOLS, true)
+        webTools = prefs.getBoolean(KEY_WEB_TOOLS, true),
+        mcpUrl = prefs.getString(KEY_MCP_URL, "").orEmpty()
     )
 
     fun save(settings: Settings) {
@@ -53,6 +56,7 @@ class SettingsStore(context: Context) {
             .putString(KEY_SYSTEM_PROMPT, settings.systemPrompt)
             .putString(KEY_THEME, settings.theme)
             .putBoolean(KEY_WEB_TOOLS, settings.webTools)
+            .putString(KEY_MCP_URL, settings.mcpUrl)
             .apply()
     }
 
@@ -67,5 +71,6 @@ class SettingsStore(context: Context) {
         const val KEY_SYSTEM_PROMPT = "system_prompt"
         const val KEY_THEME = "theme"
         const val KEY_WEB_TOOLS = "web_tools"
+        const val KEY_MCP_URL = "mcp_url"
     }
 }

@@ -10,12 +10,14 @@ data class ImageRef(
 enum class Role(val wire: String) {
     SYSTEM("system"),
     USER("user"),
-    ASSISTANT("assistant");
+    ASSISTANT("assistant"),
+    TOOL("tool");
 
     companion object {
         fun fromWire(value: String): Role = when (value) {
             "system" -> SYSTEM
             "assistant" -> ASSISTANT
+            "tool" -> TOOL
             else -> USER
         }
     }
@@ -41,7 +43,11 @@ data class Msg(
     /** 服务端 Web 工具调用块（原样回传用），存 JSON 数组字符串 */
     val serverToolCalls: String? = null,
     /** 引用来源（annotations），存 JSON 数组字符串 */
-    val annotations: String? = null
+    val annotations: String? = null,
+    /** assistant 的 tool_calls（OpenAI 格式 JSON 数组字符串） */
+    val toolCallsJson: String? = null,
+    /** role=tool 时对应的 tool_call_id */
+    val toolCallId: String? = null
 )
 
 data class Conversation(
@@ -65,6 +71,22 @@ data class ConversationMeta(
     val updatedAt: Long,
     val messageCount: Int
 )
+
+/** DeepSeek 的 `latest_reminder`：告诉模型当前日期/平台/语言，格式 `<date>,<weekday>,<location>,<platform>,<language>` */
+object LatestReminder {
+    private val WEEKDAYS = arrayOf("星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日")
+
+    /**
+     * 按消息自身的创建时间生成，保证历史消息每次回传的都是同一串（不影响上下文缓存命中）。
+     */
+    fun of(timestamp: Long): String {
+        val zone = java.time.ZoneId.systemDefault()
+        val date = java.time.Instant.ofEpochMilli(timestamp).atZone(zone).toLocalDate()
+        val weekday = WEEKDAYS[date.dayOfWeek.value - 1]
+        // location 用系统时区标识（非空，避免空字段带来的解析风险）
+        return "$date,$weekday,${zone.id},App,中文"
+    }
+}
 
 object Models {
     const val FLASH = "deepseek-flash"

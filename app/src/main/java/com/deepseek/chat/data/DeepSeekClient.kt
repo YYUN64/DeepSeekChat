@@ -170,8 +170,16 @@ class DeepSeekClient(private val images: ImageStore) {
         val supportsVision = Models.supportsVision(model)
         val withTools = settings.webTools
         for (msg in history) {
-            // 只有思考内容、没有正文的 assistant 消息会让接口报 400，直接跳过
-            if (msg.role == Role.ASSISTANT && msg.text.isBlank()) continue
+            // 每条 user 消息前带一条 latest_reminder：模型每轮都知道今天几号（且不破坏缓存）
+            if (msg.role == Role.USER) {
+                messages.put(
+                    JSONObject()
+                        .put("role", "latest_reminder")
+                        .put("content", LatestReminder.of(msg.createdAt))
+                )
+            }
+            // 只有思考内容、没有正文也没有工具调用的 assistant 消息会让接口报 400，直接跳过
+            if (msg.role == Role.ASSISTANT && msg.text.isBlank() && msg.toolCallsJson == null) continue
             messages.put(messageToJson(msg, supportsVision, withTools, imageBudget))
         }
         val payload = JSONObject()
@@ -205,12 +213,22 @@ class DeepSeekClient(private val images: ImageStore) {
         imageBudget: LongArray
     ): JSONObject {
         val json = JSONObject().put("role", msg.role.wire)
-        if (msg.role == Role.ASSISTANT && withTools) {
-            // 带 tools 时，历史里的思考内容必须原样回传，否则 400
-            if (msg.reasoning.isNotBlank()) json.put("reasoning_content", msg.reasoning)
+        if (msg.role == Role.TOOL) {
+            // 工具执行结果（MCP 场景用）
+            return json.put("tool_call_id", msg.toolCallId ?: "").put("content", msg.text)
+        }
+        if (msg.role == Role.ASSISTANT) {
+            if (withTools && msg.reasoning.isNotBlank()) {
+                // 带 tools 时，历史里的思考内容必须原样回传，否则 400
+                json.put("reasoning_content", msg.reasoning)
+            }
             // 服务端工具调用块（含 kind/signature）也要原样带回，否则读过的网页会丢
             msg.serverToolCalls?.let { raw ->
                 runCatching { json.put("server_tool_calls", JSONArray(raw)) }
+            }
+            // 客户端函数的 tool_calls（MCP 场景）
+            msg.toolCallsJson?.let { raw ->
+                runCatching { json.put("tool_calls", JSONArray(raw)) }
             }
         }
         if (msg.role == Role.USER && msg.images.isNotEmpty() && supportsVision) {

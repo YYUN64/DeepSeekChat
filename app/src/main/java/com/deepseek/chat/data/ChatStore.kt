@@ -119,6 +119,8 @@ class ChatStore(root: File) {
         if (msg.model != null) json.put("model", msg.model)
         if (msg.serverToolCalls != null) json.put("serverToolCalls", msg.serverToolCalls)
         if (msg.annotations != null) json.put("annotations", msg.annotations)
+        if (msg.toolCallsJson != null) json.put("toolCallsJson", msg.toolCallsJson)
+        if (msg.toolCallId != null) json.put("toolCallId", msg.toolCallId)
         val usage = msg.usage
         if (usage != null) {
             json.put(
@@ -172,7 +174,9 @@ class ChatStore(root: File) {
             error = json.optString("error").takeIf { it.isNotBlank() },
             model = json.optString("model").takeIf { it.isNotBlank() },
             serverToolCalls = json.optString("serverToolCalls").takeIf { it.isNotBlank() },
-            annotations = json.optString("annotations").takeIf { it.isNotBlank() }
+            annotations = json.optString("annotations").takeIf { it.isNotBlank() },
+            toolCallsJson = json.optString("toolCallsJson").takeIf { it.isNotBlank() },
+            toolCallId = json.optString("toolCallId").takeIf { it.isNotBlank() }
         )
     }
 }
