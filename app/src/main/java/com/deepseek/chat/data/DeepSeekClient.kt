@@ -205,6 +205,8 @@ class DeepSeekClient(private val images: ImageStore) {
         // 带 tools 时历史里的 reasoning_content 必须回传
         val echoTools = clientTools != null || settings.webTools
         for (msg in history) {
+            // 工具调用步骤只是界面展示，不参与请求
+            if (msg.role == Role.TOOL_STEP) continue
             // 每条 user 消息前带一条 latest_reminder：模型每轮都知道今天几号（且不破坏缓存）
             if (msg.role == Role.USER) {
                 messages.put(

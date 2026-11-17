@@ -29,6 +29,8 @@ object TokenCounter {
     }
 
     fun estimateMessage(msg: Msg): Int {
+        // 工具步骤只在界面上展示，不发给模型，也不占上下文
+        if (msg.role == Role.TOOL_STEP) return 0
         var tokens = estimate(msg.text) + 4
         for (image in msg.images) {
             tokens += IMAGE_TOKENS

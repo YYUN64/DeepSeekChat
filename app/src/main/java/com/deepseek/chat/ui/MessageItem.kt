@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
@@ -57,10 +58,10 @@ fun MessageItem(
     onRegenerate: (() -> Unit)?,
     onImageClick: (ImageRef) -> Unit
 ) {
-    if (msg.role == Role.USER) {
-        UserMessage(msg, imageLoader, onImageClick)
-    } else {
-        AssistantMessage(msg, streaming, onRegenerate)
+    when (msg.role) {
+        Role.USER -> UserMessage(msg, imageLoader, onImageClick)
+        Role.TOOL_STEP -> ToolStepCard(msg)
+        else -> AssistantMessage(msg, streaming, onRegenerate)
     }
 }
 
@@ -198,7 +199,8 @@ private fun AssistantMessage(
             }
         }
 
-        if (!streaming) {
+        // 工具调用前的分段正文不显示「复制/重试」，它只是过程的一部分
+        if (!streaming && !msg.intermediate) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(top = 2.dp)
@@ -240,6 +242,77 @@ private fun AssistantMessage(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 工具调用步骤卡片：工具名 + 参数摘要 + 结果摘要/成功失败。
+ * 作为对话里的一条消息持久化，切会话/杀进程回来仍在。
+ */
+@Composable
+private fun ToolStepCard(msg: Msg) {
+    val failed = msg.error != null
+    val running = !failed && msg.text.isBlank()
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Outlined.Build,
+                    contentDescription = null,
+                    tint = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    text = "调用工具 · ${msg.toolName ?: "工具"}",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(start = 6.dp)
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                Text(
+                    text = when {
+                        failed -> "失败"
+                        running -> "执行中…"
+                        else -> "完成"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (failed) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (!msg.toolArgs.isNullOrBlank()) {
+                Text(
+                    text = "参数  ${msg.toolArgs}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
+            }
+            if (msg.text.isNotBlank()) {
+                Text(
+                    text = "结果  ${msg.text}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 6,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+            if (failed) {
+                Text(
+                    text = msg.error ?: "调用失败",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
             }
         }
     }

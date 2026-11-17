@@ -104,4 +104,62 @@ class ChatStoreTest {
         assertTrue(loaded.messages[1].reasoning.isEmpty())
         assertNull(loaded.messages[1].error)
     }
+
+    @Test
+    fun `tool step keeps name args result and failure marker`() {
+        val store = store()
+        val conversation = Conversation(
+            id = "conv-tools",
+            messages = listOf(
+                Msg(id = "u1", role = Role.USER, text = "算一下 1234*5678"),
+                Msg(
+                    id = "prelude",
+                    role = Role.ASSISTANT,
+                    text = "我用 calc 算一下。",
+                    reasoning = "需要调用计算工具",
+                    intermediate = true
+                ),
+                Msg(
+                    id = "step-ok",
+                    role = Role.TOOL_STEP,
+                    text = "7006652",
+                    toolCallId = "call_1",
+                    toolName = "calc",
+                    toolArgs = "{\"expression\":\"1234*5678\"}"
+                ),
+                Msg(
+                    id = "step-fail",
+                    role = Role.TOOL_STEP,
+                    text = "",
+                    toolCallId = "call_2",
+                    toolName = "read_file",
+                    toolArgs = "{\"path\":\"/nope\"}",
+                    error = "调用失败：file not found"
+                ),
+                Msg(id = "final", role = Role.ASSISTANT, text = "结果是 7006652")
+            )
+        )
+
+        store.save(conversation)
+        val loaded = store.load("conv-tools")!!
+
+        assertEquals(5, loaded.messages.size)
+        val prelude = loaded.messages[1]
+        assertTrue(prelude.intermediate)
+        assertEquals("需要调用计算工具", prelude.reasoning)
+
+        val ok = loaded.messages[2]
+        assertEquals(Role.TOOL_STEP, ok.role)
+        assertEquals("calc", ok.toolName)
+        assertEquals("{\"expression\":\"1234*5678\"}", ok.toolArgs)
+        assertEquals("7006652", ok.text)
+        assertEquals("call_1", ok.toolCallId)
+        assertNull(ok.error)
+
+        val failed = loaded.messages[3]
+        assertEquals(Role.TOOL_STEP, failed.role)
+        assertEquals("read_file", failed.toolName)
+        assertEquals("调用失败：file not found", failed.error)
+        assertEquals("结果是 7006652", loaded.messages[4].text)
+    }
 }

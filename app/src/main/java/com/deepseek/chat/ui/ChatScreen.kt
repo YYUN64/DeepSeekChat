@@ -232,7 +232,8 @@ fun ChatScreen(
             ) {
                 // 越靠前的 item 越贴底：正在流式的消息永远在第一项，
                 // 历史消息倒序排在它上面（视觉上仍是旧→新）
-                if (state.streaming) {
+                // 工具正在执行时先不显示「思考中…」的空条：这一步由工具卡片自己展示
+                if (state.streaming && state.toolStatus == null) {
                     item(key = "streaming") {
                         MessageItem(
                             msg = Msg(

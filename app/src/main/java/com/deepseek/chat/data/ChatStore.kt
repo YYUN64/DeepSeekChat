@@ -121,6 +121,9 @@ class ChatStore(root: File) {
         if (msg.annotations != null) json.put("annotations", msg.annotations)
         if (msg.toolCallsJson != null) json.put("toolCallsJson", msg.toolCallsJson)
         if (msg.toolCallId != null) json.put("toolCallId", msg.toolCallId)
+        if (msg.toolName != null) json.put("toolName", msg.toolName)
+        if (msg.toolArgs != null) json.put("toolArgs", msg.toolArgs)
+        if (msg.intermediate) json.put("intermediate", true)
         val usage = msg.usage
         if (usage != null) {
             json.put(
@@ -163,7 +166,7 @@ class ChatStore(root: File) {
                 reasoningTokens = usageJson.optInt("reasoning", 0)
             )
         }
-        return Msg(
+        val msg = Msg(
             id = json.optString("id").ifBlank { java.util.UUID.randomUUID().toString() },
             role = Role.fromWire(json.optString("role")),
             text = json.optString("text"),
@@ -176,7 +179,16 @@ class ChatStore(root: File) {
             serverToolCalls = json.optString("serverToolCalls").takeIf { it.isNotBlank() },
             annotations = json.optString("annotations").takeIf { it.isNotBlank() },
             toolCallsJson = json.optString("toolCallsJson").takeIf { it.isNotBlank() },
-            toolCallId = json.optString("toolCallId").takeIf { it.isNotBlank() }
+            toolCallId = json.optString("toolCallId").takeIf { it.isNotBlank() },
+            toolName = json.optString("toolName").takeIf { it.isNotBlank() },
+            toolArgs = json.optString("toolArgs").takeIf { it.isNotBlank() },
+            intermediate = json.optBoolean("intermediate", false)
         )
+        // 上次进程在工具执行中途被杀：卡片不能永远停在「执行中…」
+        return if (msg.role == Role.TOOL_STEP && msg.text.isBlank() && msg.error == null) {
+            msg.copy(error = "执行已中断")
+        } else {
+            msg
+        }
     }
 }

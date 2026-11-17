@@ -368,7 +368,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val current = _state.value.conversation ?: return
         if (_state.value.streaming) return
         val kept = current.messages.toMutableList()
-        while (kept.isNotEmpty() && kept.last().role == Role.ASSISTANT) {
+        // 工具调用会在 assistant 中间插入「分段正文」和「工具步骤」，重试时要一起回退到用户消息
+        while (kept.isNotEmpty() && kept.last().role != Role.USER) {
             kept.removeAt(kept.size - 1)
         }
         if (kept.isEmpty() || kept.last().role != Role.USER) return
@@ -456,9 +457,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val requestMessages = history.toMutableList()
             var rounds = 0
             var webFallback = false
-            // 已显示的内容只追加不清空：模型先说话、再调用工具时，前面的文字必须留在屏幕上
+            // 已显示的内容只追加不清空：模型先说话、再调用工具时，前面的文字必须留在屏幕上。
+            // 但每次工具调用都会把「本轮」增量固化成一条消息，下一轮从空白重新开始，
+            // 这样工具卡片能插在「思考」和「最终答案」中间，而不是被后来的文字盖住。
             var contentStart = 0
             var reasoningStart = 0
+            // 是否已经因为工具调用固化过内容：最后一轮没有正文时不该再报「没有收到内容」
+            var sawToolRound = false
             try {
                 while (true) {
                     contentStart = content.length
@@ -474,11 +479,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             functionTools = functionTools,
                             onReasoning = { delta ->
                                 reasoning.append(delta)
-                                publishStream(reasoning = reasoning.toString())
+                                publishStream(reasoning = reasoning.substring(reasoningStart))
                             },
                             onContent = { delta ->
                                 content.append(delta)
-                                publishStream(content = content.toString())
+                                publishStream(content = content.substring(contentStart))
                             }
                         )
                     } catch (e: ApiException) {
@@ -506,13 +511,36 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         break
                     }
                     rounds++
-                    // 把带 tool_calls 的 assistant 轮次和工具结果接进上下文，再请求一次。
-                    // 注意：只取本轮新增的部分，之前的文字留在屏幕上、不重复发给模型。
+
+                    // 1) 工具调用前这一轮的正文/思考固化成可见消息：
+                    //    思考面板随之从「深度思考中…」变成「已深度思考」，不再和工具卡片抢位置
+                    val segmentText = content.substring(contentStart)
+                    val segmentThought = reasoning.substring(reasoningStart)
+                    if (segmentText.isNotBlank() || segmentThought.isNotBlank()) {
+                        appendVisible(
+                            conversation.id,
+                            myRound,
+                            Msg(
+                                id = UUID.randomUUID().toString(),
+                                role = Role.ASSISTANT,
+                                text = segmentText,
+                                reasoning = segmentThought,
+                                model = effectiveModel,
+                                intermediate = true
+                            )
+                        )
+                        sawToolRound = true
+                    }
+                    // 下一轮从空白开始展示，避免和刚固化的内容重复
+                    _state.update { it.copy(streamText = "", streamReasoning = "") }
+                    lastStreamPush = 0L
+
+                    // 2) 带 tool_calls 的 assistant 轮次接进给模型的上下文
                     requestMessages += Msg(
                         id = UUID.randomUUID().toString(),
                         role = Role.ASSISTANT,
-                        text = content.substring(contentStart),
-                        reasoning = reasoning.substring(reasoningStart),
+                        text = segmentText,
+                        reasoning = segmentThought,
                         toolCallsJson = calls,
                         model = effectiveModel
                     )
@@ -522,10 +550,33 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         val function = call.optJSONObject("function")
                         val name = function?.optString("name").orEmpty()
                         val arguments = function?.optString("arguments").orEmpty().ifBlank { "{}" }
-                        _state.update { it.copy(toolStatus = "调用工具：$name") }
+                        // 3) 先落一张「执行中」的工具卡片（可见、可持久化），跑完再补结果
+                        val stepId = UUID.randomUUID().toString()
+                        appendVisible(
+                            conversation.id,
+                            myRound,
+                            Msg(
+                                id = stepId,
+                                role = Role.TOOL_STEP,
+                                toolCallId = call.optString("id"),
+                                toolName = name.ifBlank { "tool" },
+                                toolArgs = summarize(arguments, 200)
+                            )
+                        )
+                        sawToolRound = true
+                        // 底栏状态只是补充，整个工具执行期间都留着，不再设置后立刻清空
+                        _state.update { it.copy(toolStatus = "正在调用工具：$name") }
+                        var failed = false
                         val output = withContext(Dispatchers.IO) {
                             runCatching { activeMcp.callTool(name, arguments) }
+                                .onFailure { failed = true }
                                 .getOrElse { "工具调用失败：${it.message}" }
+                        }
+                        updateVisible(conversation.id, myRound, stepId) {
+                            it.copy(
+                                text = if (failed) "" else summarize(output, 400),
+                                error = if (failed) "调用失败：${summarize(output, 200)}" else null
+                            )
                         }
                         requestMessages += Msg(
                             id = UUID.randomUUID().toString(),
@@ -542,21 +593,30 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 failure = e.message ?: "请求失败"
             } finally {
                 _state.update { it.copy(toolStatus = null) }
+                // 停止/异常时正在跑的工具卡片不能永远停在「执行中」
+                markStaleToolSteps(conversation.id, myRound)
             }
 
             // 已经被新一轮请求取代：直接丢弃，避免把过期内容写进当前会话。
             // 注意 stop() 不递增 round：用户点“停止”时，已生成的内容仍会作为一条消息保留。
             if (myRound != round) return@launch
 
-            val answer = content.toString()
-            val thought = reasoning.toString()
+            // 最后一轮（工具调用之后）的增量才是最终答案
+            val answer = content.substring(contentStart)
+            val thought = reasoning.substring(reasoningStart)
             if (answer.isBlank() && thought.isBlank()) {
                 _state.update {
                     it.copy(
                         streaming = false,
                         streamText = "",
                         streamReasoning = "",
-                        error = failure ?: if (cancelled) "已停止" else "没有收到内容，请重试"
+                        error = when {
+                            failure != null -> failure
+                            // 工具步骤已经展示过内容，这里只是本轮没有正文，不报错
+                            sawToolRound -> null
+                            cancelled -> "已停止"
+                            else -> "没有收到内容，请重试"
+                        }
                     )
                 }
                 return@launch
@@ -630,6 +690,64 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 streamText = content ?: it.streamText
             )
         }
+    }
+
+    /**
+     * 把一条可见消息（工具步骤 / 工具调用前的 assistant 分段）追加到当前会话并立即落盘。
+     * 只在本轮流式会话仍有效时执行，避免切会话后把内容写到别的会话里。
+     */
+    private fun appendVisible(conversationId: String, myRound: Int, msg: Msg) {
+        if (myRound != round) return
+        val current = _state.value.conversation ?: return
+        if (current.id != conversationId) return
+        val updated = current.copy(
+            messages = current.messages + msg,
+            updatedAt = System.currentTimeMillis()
+        )
+        _state.update { it.copy(conversation = updated) }
+        runCatching { chatStore.save(updated) }
+    }
+
+    /** 更新一条已追加的可见消息（例如工具执行结果）并落盘 */
+    private fun updateVisible(conversationId: String, myRound: Int, id: String, transform: (Msg) -> Msg) {
+        if (myRound != round) return
+        val current = _state.value.conversation ?: return
+        if (current.id != conversationId) return
+        val updated = current.copy(
+            messages = current.messages.map { if (it.id == id) transform(it) else it },
+            updatedAt = System.currentTimeMillis()
+        )
+        _state.update { it.copy(conversation = updated) }
+        runCatching { chatStore.save(updated) }
+    }
+
+    /** 把工具参数/结果压成一行摘要，便于卡片展示 */
+    private fun summarize(text: String, max: Int): String {
+        val flat = text.replace(Regex("\\s+"), " ").trim()
+        return if (flat.length <= max) flat else flat.take(max) + "…"
+    }
+
+    /** 本轮结束时仍没有结果的工具步骤（被停止/异常）标记为中断，避免卡片一直显示「执行中…」 */
+    private fun markStaleToolSteps(conversationId: String, myRound: Int) {
+        if (myRound != round) return
+        val current = _state.value.conversation ?: return
+        if (current.id != conversationId) return
+        val hasRunning = current.messages.any {
+            it.role == Role.TOOL_STEP && it.text.isBlank() && it.error == null
+        }
+        if (!hasRunning) return
+        val updated = current.copy(
+            messages = current.messages.map {
+                if (it.role == Role.TOOL_STEP && it.text.isBlank() && it.error == null) {
+                    it.copy(error = "执行已中断")
+                } else {
+                    it
+                }
+            },
+            updatedAt = System.currentTimeMillis()
+        )
+        _state.update { it.copy(conversation = updated) }
+        runCatching { chatStore.save(updated) }
     }
 
     override fun onCleared() {

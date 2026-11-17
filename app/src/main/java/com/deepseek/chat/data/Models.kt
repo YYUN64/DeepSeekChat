@@ -11,13 +11,17 @@ enum class Role(val wire: String) {
     SYSTEM("system"),
     USER("user"),
     ASSISTANT("assistant"),
-    TOOL("tool");
+    TOOL("tool"),
+
+    /** 仅用于界面展示的工具调用步骤（会持久化，但不发给模型） */
+    TOOL_STEP("tool_step");
 
     companion object {
         fun fromWire(value: String): Role = when (value) {
             "system" -> SYSTEM
             "assistant" -> ASSISTANT
             "tool" -> TOOL
+            "tool_step" -> TOOL_STEP
             else -> USER
         }
     }
@@ -47,7 +51,16 @@ data class Msg(
     /** assistant 的 tool_calls（OpenAI 格式 JSON 数组字符串） */
     val toolCallsJson: String? = null,
     /** role=tool 时对应的 tool_call_id */
-    val toolCallId: String? = null
+    val toolCallId: String? = null,
+    /** role=tool_step 时展示用的工具名 */
+    val toolName: String? = null,
+    /** role=tool_step 时展示用的参数摘要 */
+    val toolArgs: String? = null,
+    /**
+     * 工具调用前的 assistant 分段（思考/正文），只用于界面展示：
+     * 不算最终答案，也不显示「复制/重试」按钮行。
+     */
+    val intermediate: Boolean = false
 )
 
 data class Conversation(
