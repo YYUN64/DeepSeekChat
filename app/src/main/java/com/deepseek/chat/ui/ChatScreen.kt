@@ -48,6 +48,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,6 +68,7 @@ import com.deepseek.chat.data.Models
 import com.deepseek.chat.data.Msg
 import com.deepseek.chat.data.Role
 import com.deepseek.chat.data.TokenCounter
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -118,6 +120,7 @@ fun ChatScreen(
     }
 
     val itemCount = messages.size + if (state.streaming) 1 else 0
+    val scope = rememberCoroutineScope()
     // 只有用户自己滚动到底部之后才继续跟随；往上看历史时不再把他拽回去
     var followBottom by remember { mutableStateOf(true) }
     LaunchedEffect(listState) {
@@ -255,7 +258,20 @@ fun ChatScreen(
                         streaming = true,
                         imageLoader = imageLoader,
                         onRegenerate = null,
-                        onImageClick = {}
+                        onImageClick = {},
+                        // 展开思考面板时：停止自动跟随，并把滚动位置归位到合法范围。
+                        // 跟随用的是超出底部的超大偏移量，展开动画改变条目高度时每帧都会被夹紧，
+                        // 和动画互相拉扯，表现就是持续上下抽搐。
+                        onReasoningToggle = {
+                            followBottom = false
+                            if (state.streaming) {
+                                scope.launch {
+                                    if (itemCount > 0) {
+                                        listState.scrollToItem(itemCount - 1, 0)
+                                    }
+                                }
+                            }
+                        }
                     )
                 }
             }

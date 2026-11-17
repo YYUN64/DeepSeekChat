@@ -55,12 +55,13 @@ fun MessageItem(
     streaming: Boolean,
     imageLoader: (ImageRef, Int) -> android.graphics.Bitmap?,
     onRegenerate: (() -> Unit)?,
-    onImageClick: (ImageRef) -> Unit
+    onImageClick: (ImageRef) -> Unit,
+    onReasoningToggle: (() -> Unit)? = null
 ) {
     if (msg.role == Role.USER) {
         UserMessage(msg, imageLoader, onImageClick)
     } else {
-        AssistantMessage(msg, streaming, onRegenerate)
+        AssistantMessage(msg, streaming, onRegenerate, onReasoningToggle)
     }
 }
 
@@ -105,7 +106,12 @@ private fun UserMessage(
 }
 
 @Composable
-private fun AssistantMessage(msg: Msg, streaming: Boolean, onRegenerate: (() -> Unit)?) {
+private fun AssistantMessage(
+    msg: Msg,
+    streaming: Boolean,
+    onRegenerate: (() -> Unit)?,
+    onReasoningToggle: (() -> Unit)?
+) {
     val clipboard = LocalClipboardManager.current
     val uriHandler = LocalUriHandler.current
     var expanded by remember(msg.id) { mutableStateOf(false) }
@@ -116,7 +122,10 @@ private fun AssistantMessage(msg: Msg, streaming: Boolean, onRegenerate: (() -> 
                 text = msg.reasoning,
                 streaming = streaming,
                 expanded = expanded,
-                onToggle = { expanded = !expanded }
+                onToggle = {
+                expanded = !expanded
+                onReasoningToggle?.invoke()
+            }
             )
             Spacer(modifier = Modifier.height(8.dp))
         }
