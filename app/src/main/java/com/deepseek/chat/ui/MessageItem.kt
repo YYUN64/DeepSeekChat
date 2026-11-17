@@ -1,4 +1,4 @@
-package com.deepseek.chat.ui
+﻿package com.deepseek.chat.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -28,6 +30,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -251,11 +254,20 @@ private fun AssistantMessage(
 }
 
 @Composable
-private fun ReasoningPanel(    text: String,
+private fun ReasoningPanel(
+    text: String,
     streaming: Boolean,
     expanded: Boolean,
     onToggle: () -> Unit
 ) {
+    // 固定最大高度 + 内部滚动 + 流式时自动跟到底部：
+    // 这样外层列表高度不再随思考内容增长而变化，不会出现整体跳动。
+    val reasoningScroll = rememberScrollState()
+    LaunchedEffect(expanded, streaming, text) {
+        if (expanded && streaming) {
+            reasoningScroll.scrollTo(reasoningScroll.maxValue)
+        }
+    }
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,
         shape = RoundedCornerShape(12.dp),
@@ -290,7 +302,10 @@ private fun ReasoningPanel(    text: String,
                         Text(
                             text = text,
                             style = MaterialTheme.typography.bodySmall.copy(lineHeight = 19.sp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .height(240.dp)
+                                .verticalScroll(reasoningScroll)
                         )
                     }
                 }
