@@ -26,9 +26,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.Menu
-import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -40,7 +41,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -55,6 +55,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.painterResource
+import com.deepseek.chat.R
 import com.deepseek.chat.data.ContextLimits
 import com.deepseek.chat.data.Conversation
 import com.deepseek.chat.data.Reasoning
@@ -71,7 +73,6 @@ fun ChatScreen(
     imageLoader: (ImageRef, Int) -> android.graphics.Bitmap?,
     onOpenDrawer: () -> Unit,
     onNewChat: () -> Unit,
-    onOpenSettings: () -> Unit,
     onInput: (String) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
@@ -140,17 +141,17 @@ fun ChatScreen(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            TopAppBar(
+            CenterAlignedTopAppBar(
                 navigationIcon = {
                     IconButton(onClick = onOpenDrawer) {
-                        Icon(Icons.Outlined.Menu, contentDescription = "会话列表")
+                        // 三条长度递减的横线，与官方 App 的历史入口一致
+                        Icon(Icons.Outlined.FilterList, contentDescription = "会话列表")
                     }
                 },
                 title = {
                     Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { showOptions = true }
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.clickable { showOptions = true }
                     ) {
                         Text(
                             text = conversation?.title ?: Conversation.DEFAULT_TITLE,
@@ -170,9 +171,6 @@ fun ChatScreen(
                 actions = {
                     IconButton(onClick = onNewChat) {
                         Icon(Icons.Outlined.Add, contentDescription = "新建对话")
-                    }
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Outlined.Settings, contentDescription = "设置")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -211,10 +209,7 @@ fun ChatScreen(
         ) {
             if (messages.isEmpty() && !state.streaming) {
                 item(key = "empty") {
-                    EmptyState(
-                        hasKey = state.settings.hasKey,
-                        onPick = { prompt -> onInput(prompt) }
-                    )
+                    EmptyState(hasKey = state.settings.hasKey)
                 }
             }
             items(messages, key = { it.id }) { msg ->
@@ -294,66 +289,44 @@ private fun ErrorBanner(message: String, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun EmptyState(hasKey: Boolean, onPick: (String) -> Unit) {
-    val prompts = listOf(
-        "帮我解释一下这张截图里的报错",
-        "用中文总结一下今天的新闻",
-        "写一个 Android 的 RecyclerView 示例",
-        "深度思考：如何设计一个可扩展的插件系统？"
-    )
+private fun EmptyState(hasKey: Boolean) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 48.dp),
+            .padding(top = 150.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
             modifier = Modifier
-                .size(64.dp)
+                .size(84.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer),
+                .background(Color(0xFF4D6BFE)),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = "D",
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold
+            Icon(
+                painter = painterResource(R.drawable.ic_launcher_foreground),
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(66.dp)
             )
         }
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(20.dp))
         Text(
-            text = "有什么可以帮你？",
+            text = "今天有什么可以帮到你？",
             style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold
+            color = MaterialTheme.colorScheme.onSurface
         )
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            text = if (hasKey) "支持图片、深度思考、1M 上下文" else "先去设置里填一个 API Key，就能开始聊天了",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(24.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            for (prompt in prompts) {
-                Surface(
-                    color = MaterialTheme.colorScheme.surface,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onPick(prompt) }
-                ) {
-                    Text(
-                        text = prompt,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
-                    )
-                }
-            }
+        if (!hasKey) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "先在左下角菜单 → 设置里填入 API Key",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
+
 
 @Composable
 private fun ConversationOptionsDialog(

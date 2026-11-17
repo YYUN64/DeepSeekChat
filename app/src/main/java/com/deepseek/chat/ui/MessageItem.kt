@@ -107,40 +107,6 @@ private fun AssistantMessage(msg: Msg, streaming: Boolean, onRegenerate: (() -> 
     var expanded by remember(msg.id) { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(bottom = 8.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(20.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "D",
-                    color = Color.White,
-                    style = MaterialTheme.typography.labelSmall
-                )
-            }
-            Text(
-                text = "DeepSeek",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 6.dp)
-            )
-            val modelName = msg.model
-            if (modelName != null) {
-                Text(
-                    text = "· " + Models.label(modelName),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 6.dp)
-                )
-            }
-        }
-
         if (msg.reasoning.isNotBlank()) {
             ReasoningPanel(
                 text = msg.reasoning,

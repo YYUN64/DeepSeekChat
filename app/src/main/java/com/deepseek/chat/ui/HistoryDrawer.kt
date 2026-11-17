@@ -44,9 +44,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.deepseek.chat.R
 import com.deepseek.chat.data.ConversationMeta
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -83,12 +85,17 @@ fun HistoryDrawer(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(28.dp)
+                        .size(32.dp)
                         .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary),
+                        .background(Color(0xFF4D6BFE)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("D", color = Color.White, style = MaterialTheme.typography.labelMedium)
+                    Icon(
+                        painter = painterResource(R.drawable.ic_launcher_foreground),
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(26.dp)
+                    )
                 }
                 Text(
                     text = "DeepSeek",

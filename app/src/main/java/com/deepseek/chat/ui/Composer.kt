@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -91,7 +92,7 @@ fun Composer(
         }
 
         Row(verticalAlignment = Alignment.Bottom) {
-            IconButton(onClick = onPickImage, enabled = !streaming) {
+            IconButton(onClick = onPickImage, enabled = !streaming, modifier = Modifier.size(52.dp)) {
                 Icon(
                     imageVector = Icons.Outlined.AddPhotoAlternate,
                     contentDescription = "添加图片",
@@ -101,7 +102,9 @@ fun Composer(
             TextField(
                 value = input,
                 onValueChange = onInput,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 52.dp),
                 placeholder = {
                     Text(
                         text = "给 DeepSeek 发消息…",
@@ -128,7 +131,7 @@ fun Composer(
             FilledIconButton(
                 onClick = if (streaming) onStop else onSend,
                 enabled = streaming || input.isNotBlank() || images.isNotEmpty(),
-                modifier = Modifier.size(44.dp),
+                modifier = Modifier.size(52.dp),
                 colors = IconButtonDefaults.filledIconButtonColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,

@@ -73,7 +73,6 @@ fun DeepSeekApp(state: ChatUiState, vm: ChatViewModel) {
             imageLoader = imageLoader,
             onOpenDrawer = { scope.launch { drawerState.open() } },
             onNewChat = { vm.newConversation() },
-            onOpenSettings = { vm.setShowSettings(true) },
             onInput = { text -> vm.setInput(text) },
             onSend = { vm.send() },
             onStop = { vm.stop() },

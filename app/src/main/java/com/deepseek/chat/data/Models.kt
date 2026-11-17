@@ -74,6 +74,13 @@ object Models {
         else -> model
     }
 
+    /** 顶栏/胶囊里用的短名 */
+    fun shortLabel(model: String): String = when (model) {
+        FLASH -> "Flash"
+        PRO -> "V4 Pro"
+        else -> model
+    }
+
     fun description(model: String): String = when (model) {
         FLASH -> "支持看图，速度快，价格低"
         PRO -> "纯文本，推理与写作更强，不支持图片"
