@@ -140,8 +140,24 @@ object Reasoning {
     }
 }
 
-object ContextLimits {
-    val contextPresets = listOf(16_384, 32_768, 65_536, 131_072, 262_144, 524_288, 1_048_576)
+/** 外观：跟随系统 / 浅色 / 深色 */
+object ThemeMode {
+    const val SYSTEM = "system"
+    const val LIGHT = "light"
+    const val DARK = "dark"
+
+    val presets = listOf(SYSTEM, LIGHT, DARK)
+
+    fun label(mode: String): String = when (mode) {
+        LIGHT -> "浅色"
+        DARK -> "深色"
+        else -> "跟随系统"
+    }
+
+    fun normalize(mode: String): String = if (mode in presets) mode else SYSTEM
+}
+
+object ContextLimits {    val contextPresets = listOf(16_384, 32_768, 65_536, 131_072, 262_144, 524_288, 1_048_576)
     val outputPresets = listOf(4_096, 8_192, 16_384, 32_768, 65_536, 131_072, 262_144, 393_216)
 
     fun label(tokens: Int): String = when {

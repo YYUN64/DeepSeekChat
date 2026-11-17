@@ -1,11 +1,21 @@
 package com.deepseek.chat
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.deepseek.chat.data.ThemeMode
 import com.deepseek.chat.ui.ChatViewModel
 import com.deepseek.chat.ui.DeepSeekApp
 import com.deepseek.chat.ui.theme.DeepSeekTheme
@@ -17,9 +27,39 @@ class MainActivity : ComponentActivity() {
         setContent {
             val vm: ChatViewModel = viewModel()
             val state by vm.state.collectAsStateWithLifecycle()
-            DeepSeekTheme {
+
+            val darkTheme = when (state.settings.theme) {
+                ThemeMode.LIGHT -> false
+                ThemeMode.DARK -> true
+                else -> isSystemInDarkTheme()
+            }
+
+            DeepSeekTheme(darkTheme = darkTheme) {
+                val background = MaterialTheme.colorScheme.background
+                val view = LocalView.current
+                SideEffect {
+                    // 应用内主题可能与系统不同：状态栏/导航栏底色和图标颜色都要跟着应用走
+                    view.context.findActivity()?.window?.let { window ->
+                        @Suppress("DEPRECATION")
+                        window.statusBarColor = background.toArgb()
+                        @Suppress("DEPRECATION")
+                        window.navigationBarColor = background.toArgb()
+                        val controller = WindowCompat.getInsetsController(window, view)
+                        controller.isAppearanceLightStatusBars = !darkTheme
+                        controller.isAppearanceLightNavigationBars = !darkTheme
+                    }
+                }
                 DeepSeekApp(state = state, vm = vm)
             }
         }
     }
+}
+
+private fun Context.findActivity(): Activity? {
+    var context: Context? = this
+    while (context is ContextWrapper) {
+        if (context is Activity) return context
+        context = context.baseContext
+    }
+    return null
 }

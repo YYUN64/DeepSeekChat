@@ -2,6 +2,7 @@ package com.deepseek.chat.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.DragInteraction
@@ -300,14 +301,23 @@ private fun EmptyState(hasKey: Boolean) {
             .padding(top = 150.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Image(
-            painter = painterResource(R.drawable.avatar),
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
+        Box(
             modifier = Modifier
                 .size(92.dp)
                 .clip(CircleShape)
-        )
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Image(
+                painter = painterResource(R.drawable.avatar),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(88.dp)
+                    .clip(CircleShape)
+            )
+        }
         Spacer(modifier = Modifier.height(20.dp))
         Text(
             text = "今天有什么可以帮到你？",

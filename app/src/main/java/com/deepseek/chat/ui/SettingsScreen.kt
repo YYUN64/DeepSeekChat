@@ -42,6 +42,7 @@ import com.deepseek.chat.data.ContextLimits
 import com.deepseek.chat.data.Models
 import com.deepseek.chat.data.Reasoning
 import com.deepseek.chat.data.Settings
+import com.deepseek.chat.data.ThemeMode
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -185,6 +186,24 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 10.dp)
                 )
+            }
+
+            SettingSection("外观") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    for (mode in ThemeMode.presets) {
+                        SelectableChip(
+                            label = ThemeMode.label(mode),
+                            selected = settings.theme == mode,
+                            onClick = { onChange(settings.copy(theme = mode)) }
+                        )
+                    }
+                }
             }
 
             SettingSection("上下文与输出") {

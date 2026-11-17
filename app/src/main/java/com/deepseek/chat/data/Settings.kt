@@ -10,7 +10,8 @@ data class Settings(
     val effort: String = Reasoning.HIGH,
     val contextTokens: Int = 131_072,
     val maxOutputTokens: Int = 8_192,
-    val systemPrompt: String = ""
+    val systemPrompt: String = "",
+    val theme: String = ThemeMode.SYSTEM
 ) {
     val hasKey: Boolean get() = apiKey.isNotBlank()
 
@@ -33,7 +34,8 @@ class SettingsStore(context: Context) {
         effort = Reasoning.effortFor(prefs.getString(KEY_EFFORT, Reasoning.HIGH).orEmpty()),
         contextTokens = prefs.getInt(KEY_CONTEXT, 131_072),
         maxOutputTokens = prefs.getInt(KEY_OUTPUT, 8_192),
-        systemPrompt = prefs.getString(KEY_SYSTEM_PROMPT, "").orEmpty()
+        systemPrompt = prefs.getString(KEY_SYSTEM_PROMPT, "").orEmpty(),
+        theme = ThemeMode.normalize(prefs.getString(KEY_THEME, ThemeMode.SYSTEM).orEmpty())
     )
 
     fun save(settings: Settings) {
@@ -46,6 +48,7 @@ class SettingsStore(context: Context) {
             .putInt(KEY_CONTEXT, settings.contextTokens)
             .putInt(KEY_OUTPUT, settings.maxOutputTokens)
             .putString(KEY_SYSTEM_PROMPT, settings.systemPrompt)
+            .putString(KEY_THEME, settings.theme)
             .apply()
     }
 
@@ -58,5 +61,6 @@ class SettingsStore(context: Context) {
         const val KEY_CONTEXT = "context_tokens"
         const val KEY_OUTPUT = "max_output_tokens"
         const val KEY_SYSTEM_PROMPT = "system_prompt"
+        const val KEY_THEME = "theme"
     }
 }
