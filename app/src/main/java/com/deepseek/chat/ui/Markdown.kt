@@ -63,7 +63,12 @@ private val INLINE = Regex(
         "|`([^`\\n]+?)`" +
         "|\\[([^\\]\\n]+?)\\]\\(([^)\\s]+?)\\)" +
         "|\\*([^*\\n]+?)\\*" +
-        "|(https?://[^\\s<)）]+)"
+        "|(https?://[^\\s<)）]+)" +
+        // 行内 LaTeX：\( ... \)、$$ ... $$、$ ... $，以及裸露的 \命令{...}
+        """|\\\(([^\n]+?)\\\)""" +
+        """|\$\$([^$]+?)\$\$""" +
+        """|\$(?!\$)([^$\n]+?)\$""" +
+        """|\\([a-zA-Z]+(?:\{[^{}]*\})*)"""
 )
 
 private fun splitTableRow(line: String): List<String> =
@@ -102,6 +107,7 @@ fun parseMarkdown(source: String): List<MdBlock> {
     while (index < lines.size) {
         val line = lines[index]
         val trimmed = line.trim()
+        val mathBlock = parseMathBlock(lines, index)
 
         when {
             trimmed.startsWith("```") -> {
@@ -118,6 +124,13 @@ fun parseMarkdown(source: String): List<MdBlock> {
             }
 
             trimmed.isEmpty() -> flushParagraph()
+
+            // 兜底：模型还是输出了 LaTeX 块（$$...$$、\[...\]、\begin{...}）
+            mathBlock != null -> {
+                flushParagraph()
+                blocks.add(MdBlock.Code("math", mathBlock.code))
+                index = mathBlock.endIndex
+            }
 
             isTableStart(lines, index) -> {
                 flushParagraph()
@@ -200,6 +213,120 @@ private fun listLevel(line: String): Int {
     return (indent / 2).coerceIn(0, 3)
 }
 
+// ------------------------------------------------------------------ LaTeX 兜底
+
+private class MathBlock(val code: String, val endIndex: Int)
+
+private val BEGIN_ENV = Regex("""\\begin\{([^}]*)\}""")
+
+/**
+ * 识别块级 LaTeX：$$...$$、\[...\]、\begin{env}...\end{env}。
+ * 返回转换后的等宽代码内容与结束行号；不是公式块时返回 null。
+ */
+private fun parseMathBlock(lines: List<String>, start: Int): MathBlock? {
+    val first = lines[start].trim()
+    val open: String
+    val close: String
+    when {
+        first.startsWith("$$") -> {
+            open = "$$"
+            close = "$$"
+        }
+        first.startsWith("\\[") -> {
+            open = "\\["
+            close = "\\]"
+        }
+        first.startsWith("\\begin{") -> {
+            val env = BEGIN_ENV.find(first)?.groupValues?.get(1).orEmpty()
+            if (env.isEmpty()) return null
+            open = "\\begin{$env}"
+            close = "\\end{$env}"
+        }
+        else -> return null
+    }
+
+    val sb = StringBuilder()
+    val remainder = first.removePrefix(open)
+    if (remainder.contains(close)) {
+        val code = latexBlockToCode(remainder.substringBefore(close))
+        return if (code.isBlank()) null else MathBlock(code, start)
+    }
+    if (remainder.isNotBlank()) sb.append(remainder)
+
+    var i = start + 1
+    while (i < lines.size) {
+        val current = lines[i]
+        if (current.contains(close)) {
+            val before = current.substringBefore(close)
+            if (before.isNotBlank()) {
+                if (sb.isNotEmpty()) sb.append('\n')
+                sb.append(before)
+            }
+            val code = latexBlockToCode(sb.toString())
+            return if (code.isBlank()) null else MathBlock(code, i)
+        }
+        if (sb.isNotEmpty()) sb.append('\n')
+        sb.append(current)
+        i++
+    }
+
+    // 没有闭合（流式截断）：剩下的都按公式处理
+    val code = latexBlockToCode(sb.toString())
+    return if (code.isBlank()) null else MathBlock(code, lines.size - 1)
+}
+
+private val FRAC = Regex("""\\(?:d|t)?frac\{([^{}]*)\}\{([^{}]*)\}""")
+private val SQRT = Regex("""\\sqrt\{([^{}]*)\}""")
+private val TEXT_COMMAND = Regex("""\\(?:text|mathrm|mathbf|mathit|operatorname|overline|vec|hat|bar|tilde)\{([^{}]*)\}""")
+private val THIN_SPACE = Regex("""\\[,;:! ]""")
+private val COMMAND = Regex("""\\([a-zA-Z]+)""")
+private val SCRIPT = Regex("""([\^_])\{([^{}]*)\}""")
+private val START_ENV = Regex("""\\begin\{[^}]*\}""")
+private val END_ENV = Regex("""\\end\{[^}]*\}""")
+private val DOUBLE_BACKSLASH = Regex("""\\\\(\s*\[[^\]]*\])?""")
+
+private val LATEX_COMMANDS = mapOf(
+    "times" to "×", "div" to "÷", "cdot" to "·", "pm" to "±", "mp" to "∓",
+    "approx" to "≈", "neq" to "≠", "ne" to "≠", "le" to "≤", "leq" to "≤",
+    "ge" to "≥", "geq" to "≥", "ll" to "≪", "gg" to "≫",
+    "sum" to "∑", "prod" to "∏", "int" to "∫", "infty" to "∞",
+    "pi" to "π", "alpha" to "α", "beta" to "β", "gamma" to "γ", "delta" to "δ",
+    "theta" to "θ", "lambda" to "λ", "mu" to "μ", "sigma" to "σ", "phi" to "φ",
+    "omega" to "ω", "partial" to "∂", "nabla" to "∇",
+    "rightarrow" to "→", "to" to "→", "leftarrow" to "←", "Rightarrow" to "⇒",
+    "ldots" to "…", "cdots" to "⋯", "quad" to " ", "qquad" to "  ",
+    "left" to "", "right" to "", "displaystyle" to "", "textstyle" to "",
+    "sin" to "sin", "cos" to "cos", "tan" to "tan", "log" to "log", "ln" to "ln", "det" to "det"
+)
+
+/** 行内 LaTeX → 普通文本：去掉 \left/\right 等命令，\frac{a}{b} → a/b，\text{..} 保留内容 */
+fun latexToPlain(source: String): String {
+    var text = source
+    text = FRAC.replace(text) { match -> "${match.groupValues[1]}/${match.groupValues[2]}" }
+    text = SQRT.replace(text) { match -> "√(${match.groupValues[1]})" }
+    text = TEXT_COMMAND.replace(text) { match -> match.groupValues[1] }
+    text = THIN_SPACE.replace(text, " ")
+    text = COMMAND.replace(text) { match -> LATEX_COMMANDS[match.groupValues[1]] ?: match.groupValues[1] }
+    text = SCRIPT.replace(text) { match -> match.groupValues[1] + match.groupValues[2] }
+    text = text.replace("{", "").replace("}", "")
+    return text.trim()
+}
+
+/**
+ * 块级 LaTeX 内容 → 等宽代码块文本：
+ * 去掉 \begin/\end，\\\\ 变成真实换行，& 变成两个空格，其它命令走 latexToPlain。
+ */
+fun latexBlockToCode(source: String): String {
+    var text = source.replace("\r\n", "\n")
+    text = START_ENV.replace(text, "\n")
+    text = END_ENV.replace(text, "\n")
+    text = DOUBLE_BACKSLASH.replace(text, "\n")
+    // 列分隔：去掉 & 两侧原有空格，统一成两个空格，等宽字体下大致对齐
+    text = text.replace(Regex("""\s*&\s*"""), "  ")
+    val rows = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
+    return rows.joinToString("\n") { latexToPlain(it).trim() }
+}
+
 private fun buildInline(
     raw: String,
     accent: Color,
@@ -259,6 +386,19 @@ private fun buildInline(
                 append(groups[9])
                 pop()
             }
+            // \( ... \)：去掉命令，按普通文本展示
+            groups[10].isNotEmpty() -> append(latexToPlain(groups[10]))
+            // $$ ... $$（段落中间出现的块级写法）
+            groups[11].isNotEmpty() -> append(latexToPlain(groups[11]))
+            // $ ... $：像公式才转换，货币（$5 and $10）原样保留
+            groups[12].isNotEmpty() -> {
+                val content = groups[12]
+                val looksLikeMath = content.contains('\\') || content.contains('^') ||
+                    content.contains('_') || content.contains('=')
+                append(if (looksLikeMath) latexToPlain(content) else match.value)
+            }
+            // 裸露的 \text{...}、\frac{a}{b}、\alpha 等也转成可读文本
+            groups[13].isNotEmpty() -> append(latexToPlain(match.value))
             else -> append(match.value)
         }
         cursor = match.range.last + 1

@@ -110,4 +110,68 @@ class MarkdownTest {
         assertEquals(MdBlock.Rule, blocks[1])
         assertTrue(blocks[2] is MdBlock.Paragraph)
     }
+
+    // ---------------------------------------------------------- LaTeX 兜底
+
+    @Test
+    fun `bracket pmatrix block becomes an aligned code block`() {
+        val md = """
+            \[
+            A=\begin{pmatrix}
+            1 & 2 & 3\\
+            4 & 5 & 6\\
+            7 & 8 & 10
+            \end{pmatrix}
+            \]
+        """.trimIndent()
+
+        val blocks = parseMarkdown(md)
+
+        assertEquals(1, blocks.size)
+        val code = blocks[0] as MdBlock.Code
+        assertEquals("math", code.language)
+        assertEquals("A=\n1  2  3\n4  5  6\n7  8  10", code.code)
+    }
+
+    @Test
+    fun `dollar block and vmatrix are converted to plain math text`() {
+        val dollars = parseMarkdown("""$$\int_0^1 x dx$$""")
+        assertEquals(1, dollars.size)
+        assertEquals("∫_0^1 x dx", (dollars[0] as MdBlock.Code).code)
+
+        val vmatrix = parseMarkdown(
+            """
+            \begin{vmatrix}
+            a & b\\
+            c & d
+            \end{vmatrix}
+            """.trimIndent()
+        )
+        assertEquals(1, vmatrix.size)
+        assertEquals("a  b\nc  d", (vmatrix[0] as MdBlock.Code).code)
+    }
+
+    @Test
+    fun `unclosed bracket block still renders as code`() {
+        val blocks = parseMarkdown("\\[ x^2")
+
+        assertEquals(1, blocks.size)
+        assertEquals("x^2", (blocks[0] as MdBlock.Code).code)
+    }
+
+    @Test
+    fun `latexToPlain strips commands and keeps readable symbols`() {
+        assertEquals("a/b", latexToPlain("\\frac{a}{b}"))
+        assertEquals("速度", latexToPlain("\\text{速度}"))
+        assertEquals("( x )", latexToPlain("\\left( x \\right)"))
+        assertEquals("x^2", latexToPlain("x^{2}"))
+        assertEquals("a_1", latexToPlain("a_{1}"))
+        assertEquals("1×2 - 3×4", latexToPlain("1\\times2 - 3\\times4"))
+    }
+
+    @Test
+    fun `normal inline text is not treated as math`() {
+        // 货币和普通 $ 不应被转换（由 buildInline 的 group 11 分支处理，这里验证转换函数不误伤）
+        assertEquals("5 and 10", latexToPlain("5 and 10"))
+    }
 }

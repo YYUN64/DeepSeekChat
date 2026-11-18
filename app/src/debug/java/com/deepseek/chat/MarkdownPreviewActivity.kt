@@ -92,4 +92,26 @@ fun main() {
 #1 这行不是标题（井号后没空格）
 
 > 没有空行结束的引用
+
+## LaTeX 兜底（模型仍输出公式时）
+
+\[
+A=\begin{pmatrix}
+1 & 2 & 3\\
+4 & 5 & 6\\
+7 & 8 & 10
+\end{pmatrix}
+\]
+
+行内 \(x^2\) 与 $\frac{a}{b}$，还有 \text{速度} 和 $$\int_0^1 x dx$$ 的单行写法。
+
+\begin{vmatrix}
+a & b\\
+c & d
+\end{vmatrix}
+
+\begin{aligned}
+x &= 1 + 2\\
+y &= 3 \times 4
+\end{aligned}
 """.trimIndent()

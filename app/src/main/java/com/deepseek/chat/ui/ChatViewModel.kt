@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.deepseek.chat.data.ApiException
+import com.deepseek.chat.data.BuiltinPrompts
 import com.deepseek.chat.data.ChatStore
 import com.deepseek.chat.data.Conversation
 import com.deepseek.chat.data.ConversationMeta
@@ -475,7 +476,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             thinking = conversation.thinking,
                             effort = conversation.effort,
                             history = requestMessages,
-                            systemPrompt = settings.systemPrompt,
+                            systemPrompt = BuiltinPrompts.compose(settings.systemPrompt),
                             functionTools = functionTools,
                             onReasoning = { delta ->
                                 reasoning.append(delta)
