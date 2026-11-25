@@ -1,5 +1,10 @@
 个人自用的 DeepSeek 安卓客户端，直连官方 API。
 
+## 修复（v1.4.2）
+
+- **生成中按返回键不再中断**：对话页按返回键改为把任务移到后台（`moveTaskToBack`），Activity/ViewModel 和流式协程都还活着，回答继续生成；从最近任务切回来能看到完整结果。后台被系统回收时仍会按检查点保留「已停止」的部分内容
+- 版本 1.4.2 (18)
+
 ## 修复（v1.4.1）
 
 - **公式仍然显示成代码块的问题**：模型常把公式放在 ` ```math ` / ` ```latex ` / ` ```tex ` 围栏里，之前的解析器只认 `$$...$$` / `\[...\]` / `\begin{...}`，这类围栏被当成普通代码块（还显示了 “math” 标签）。现在这些围栏会去掉围栏和 info string，按块级公式渲染；空 info、但内容以 `$$` / `\[` / `\begin{` 开头的围栏同样按公式处理
@@ -63,7 +68,7 @@
 - 修复：MCP 工具调用时，模型「先说一句再调用工具」的场合，已经显示的正文会被清空重来（现在只追加，不再重置）
 - 联网（默认开）：服务端 `deepseek_web_search` / `deepseek_read_url`，自动搜索或读取消息里的链接，回答下方附「参考来源」；搜索/抓取按次计费，可在设置里关闭
 - 时间感知：每条用户消息前带一条 DeepSeek `latest_reminder`（`日期,星期,时区,App,中文`），模型每轮都知道今天几号；由消息创建时间推导，历史回传一致，不破坏上下文缓存
-- 远程 MCP（默认关）：设置里填服务器 IPv4 + 端口，App 作为 MCP 客户端握手、拉工具列表并交给模型调用（最多 4 轮），可用「测试连接」自检；开启时「联网」服务端工具自动让位（DeepSeek 不允许同时声明）。配套服务器已拆分为独立仓库 [pocket-mcp](https://github.com/YYUN64/pocket-mcp)：单文件、纯标准库、8 个工具，Linux 一条 `sudo ./install.sh` 装成非 root 用户 + systemd 沙箱，Windows 双击 `run-windows.bat` 即可
+- 远程 MCP（默认关）：设置里填服务器 IPv4 + 端口 + Token，App 作为 MCP 客户端握手、拉工具列表并交给模型调用（轮数可配 2/4/8/不限，内部上限 64），可用「测试连接」自检；开启时「联网」服务端工具自动让位（DeepSeek 不允许同时声明）。配套服务器已拆分为独立仓库 [pocket-mcp](https://github.com/YYUN64/pocket-mcp)：单文件、纯标准库、8 个工具，Linux 一条 `sudo ./install.sh` 装成非 root 用户 + systemd 沙箱，Windows 双击 `run-windows.bat` 即可
 - 推理等级：关闭 / 低 / 高 / 极致（对齐 DeepSeek Harness 的 off/low/high/max）
 - 会话历史：本地 JSON 存储，左侧抽屉切换，冷启动默认开新会话
 - 上下文长度 / 最大回复长度可调（16K ~ 1M / 4K ~ 384K）
@@ -77,4 +82,4 @@
 - `DeepSeekLite-<tag>-debug.apk`：调试包，体积大、启动约 2 s，仅用于排查
 
 包名 `io.github.yyun64.deepseekchat`，可与官方 DeepSeek App 共存。
-release 包使用 debug keystore 签名，仅供个人侧载，不适合上架分发。
+release 包使用仓库内固定的发布 key（`app/deepseek-lite.jks` + `keystore.properties`）签名，本机与 CI 产出的证书指纹一致；仅供个人侧载，不适合上架分发。

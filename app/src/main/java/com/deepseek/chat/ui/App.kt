@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.fillMaxSize
 import com.deepseek.chat.data.ImageRef
 import kotlinx.coroutines.launch
@@ -34,6 +35,12 @@ fun DeepSeekApp(state: ChatUiState, vm: ChatViewModel) {
     BackHandler(enabled = state.showSettings) { vm.setShowSettings(false) }
     BackHandler(enabled = !state.showSettings && drawerState.isOpen) {
         scope.launch { drawerState.close() }
+    }
+    // 对话页按返回键时把任务移到后台，而不是销毁 Activity：
+    // ViewModel 和正在生成的协程都还活着，流式回答不会中断；从最近任务回来即可继续看。
+    val activity = LocalContext.current as? android.app.Activity
+    BackHandler(enabled = !state.showSettings && !drawerState.isOpen) {
+        activity?.moveTaskToBack(true)
     }
 
     // 只有真正打开抽屉时才去读磁盘上的会话列表（启动阶段不碰）
