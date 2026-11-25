@@ -167,6 +167,87 @@ class MarkdownTest {
     }
 
     @Test
+    fun `math fenced block is parsed as a math block`() {
+        val md = """
+            ```math
+            \begin{pmatrix}
+            1 & 2 & 3 \\
+            4 & 5 & 6 \\
+            7 & 8 & 10
+            \end{pmatrix}
+            ```
+        """.trimIndent()
+
+        val blocks = parseMarkdown(md)
+
+        assertEquals(1, blocks.size)
+        val math = blocks[0] as MdBlock.Math
+        assertTrue(math.latex.startsWith("\\begin{pmatrix}"))
+        assertTrue(math.latex.contains("7 & 8 & 10"))
+        // 围栏和 info string 不能漏进公式源码
+        assertTrue(!math.latex.contains("```"))
+        assertTrue(!math.latex.contains("math"))
+    }
+
+    @Test
+    fun `latex and tex fences are math too`() {
+        val latex = parseMarkdown("```latex\n\\frac{a}{b}\n```")
+        assertTrue(latex[0] is MdBlock.Math)
+        assertEquals("\\frac{a}{b}", (latex[0] as MdBlock.Math).latex)
+
+        val tex = parseMarkdown("```tex\nx^2 + y^2 = z^2\n```")
+        assertTrue(tex[0] is MdBlock.Math)
+    }
+
+    @Test
+    fun `plain fence wrapping a dollar formula is math`() {
+        val blocks = parseMarkdown(
+            """
+            ```
+            $$
+            \begin{vmatrix}
+            a & b\\
+            c & d
+            \end{vmatrix}
+            $$
+            ```
+            """.trimIndent()
+        )
+
+        assertEquals(1, blocks.size)
+        val math = blocks[0] as MdBlock.Math
+        assertTrue(math.latex.startsWith("\\begin{vmatrix}"))
+        assertTrue(!math.latex.contains("$$"))
+    }
+
+    @Test
+    fun `bare begin block is parsed as math without delimiters`() {
+        val md = """
+            \begin{bmatrix}
+            1 & 2\\
+            3 & 4
+            \end{bmatrix}
+        """.trimIndent()
+
+        val blocks = parseMarkdown(md)
+
+        assertEquals(1, blocks.size)
+        val math = blocks[0] as MdBlock.Math
+        assertTrue(math.latex.startsWith("\\begin{bmatrix}"))
+        assertTrue(math.latex.endsWith("\\end{bmatrix}"))
+    }
+
+    @Test
+    fun `python fence stays a code block`() {
+        val blocks = parseMarkdown("```python\nprint(1)\n```")
+
+        assertEquals(1, blocks.size)
+        val code = blocks[0] as MdBlock.Code
+        assertEquals("python", code.language)
+        assertEquals("print(1)", code.code)
+    }
+
+    @Test
     fun `latexToPlain strips commands and keeps readable symbols`() {
         assertEquals("a/b", latexToPlain("\\frac{a}{b}"))
         assertEquals("速度", latexToPlain("\\text{速度}"))

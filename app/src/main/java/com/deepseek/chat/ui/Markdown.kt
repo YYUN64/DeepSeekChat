@@ -128,7 +128,7 @@ fun parseMarkdown(source: String): List<MdBlock> {
         when {
             trimmed.startsWith("```") -> {
                 flushParagraph()
-                val language = trimmed.removePrefix("```").trim()
+                val info = trimmed.removePrefix("```").trim()
                 val code = StringBuilder()
                 index++
                 while (index < lines.size && !lines[index].trim().startsWith("```")) {
@@ -136,7 +136,18 @@ fun parseMarkdown(source: String): List<MdBlock> {
                     code.append(lines[index])
                     index++
                 }
-                blocks.add(MdBlock.Code(language, code.toString()))
+                val body = code.toString()
+                // 模型常用 ```math / ```latex / ```tex 围栏输出公式，按公式块渲染
+                if (isMathFence(info, body)) {
+                    val latex = stripMathDelimiters(body)
+                    if (latex.isNotBlank()) {
+                        blocks.add(MdBlock.Math(latex))
+                    } else {
+                        blocks.add(MdBlock.Code(info, body))
+                    }
+                } else {
+                    blocks.add(MdBlock.Code(info, body))
+                }
             }
 
             trimmed.isEmpty() -> flushParagraph()
@@ -232,6 +243,35 @@ private fun listLevel(line: String): Int {
 // ------------------------------------------------------------------ LaTeX 兜底
 
 private class MathBlock(val latex: String, val endIndex: Int)
+
+private val MATH_FENCE_TAGS = setOf("math", "latex", "tex", "$$")
+
+/** ```math / ```latex / ```tex（以及空 info 但内容本身是 $$/\[/\begin）按公式处理 */
+private fun isMathFence(info: String, body: String): Boolean {
+    val tag = info.trim().lowercase()
+    if (tag in MATH_FENCE_TAGS) return true
+    if (tag.isNotEmpty()) return false
+    val text = body.trim()
+    return text.startsWith("$$") || text.startsWith("\\[") || text.startsWith("\\begin{")
+}
+
+/** 去掉围栏内容里可能包含的 $$ / \[ \] 定界符（含单独占一行的情况） */
+private fun stripMathDelimiters(raw: String): String {
+    var text = raw.trim()
+    if (text.length > 4 && text.startsWith("$$") && text.endsWith("$$")) {
+        text = text.substring(2, text.length - 2).trim()
+    } else if (text.length > 4 && text.startsWith("\\[") && text.endsWith("\\]")) {
+        text = text.substring(2, text.length - 2).trim()
+    }
+    val lines = text.lines().toMutableList()
+    while (lines.isNotEmpty() && lines.first().trim() in setOf("$$", "\\[")) {
+        lines.removeAt(0)
+    }
+    while (lines.isNotEmpty() && lines.last().trim() in setOf("$$", "\\]")) {
+        lines.removeAt(lines.lastIndex)
+    }
+    return lines.joinToString("\n").trim()
+}
 
 private val BEGIN_ENV = Regex("""\\begin\{([^}]*)\}""")
 

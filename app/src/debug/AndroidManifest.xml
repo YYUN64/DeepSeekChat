@@ -5,5 +5,17 @@
             android:name=".MarkdownPreviewActivity"
             android:exported="true"
             android:theme="@style/Theme.DeepSeekChat" />
+
+        <!-- debug 包额外给一个桌面入口，方便不看 adb 也能确认公式到底渲染出来没有 -->
+        <activity-alias
+            android:name=".MathPreviewAlias"
+            android:targetActivity=".MarkdownPreviewActivity"
+            android:exported="true"
+            android:label="公式预览（debug）">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
     </application>
 </manifest>

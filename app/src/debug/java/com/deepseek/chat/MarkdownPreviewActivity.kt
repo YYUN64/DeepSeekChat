@@ -1,5 +1,6 @@
 package com.deepseek.chat
 
+import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -10,9 +11,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.deepseek.chat.ui.MarkdownText
+import com.deepseek.chat.ui.MathRenderer
 import com.deepseek.chat.ui.theme.DeepSeekTheme
 
 /**
@@ -34,6 +40,28 @@ class MarkdownPreviewActivity : ComponentActivity() {
                             .verticalScroll(rememberScrollState())
                             .padding(16.dp)
                     ) {
+                        // 自检：直接调 MathRenderer 渲染一个 pmatrix，把结果/失败原因显示出来
+                        val context = LocalContext.current
+                        val density = LocalDensity.current
+                        val probe = remember {
+                            val size = 18f * density.density
+                            val bitmap = MathRenderer.render(
+                                context,
+                                "\\begin{pmatrix} 1 & 2 \\\\ 3 & 4 \\end{pmatrix}",
+                                size,
+                                Color.WHITE
+                            )
+                            if (bitmap != null) {
+                                "成功 ${bitmap.width}x${bitmap.height}px"
+                            } else {
+                                "失败：${MathRenderer.lastError ?: "未知（返回 null）"}"
+                            }
+                        }
+                        Text(
+                            text = "MathRenderer 自检：$probe",
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.bodySmall
+                        )
                         MarkdownText(text = CORPUS)
                     }
                 }
@@ -114,4 +142,26 @@ c & d
 x &= 1 + 2\\
 y &= 3 \times 4
 \end{aligned}
+
+### 围栏写法（模型最常用）
+
+```math
+\begin{pmatrix}
+1 & 2 & 3 \\
+4 & 5 & 6 \\
+7 & 8 & 10
+\end{pmatrix}
+```
+
+```latex
+\det\begin{vmatrix}
+1 & 2 & 3 \\
+4 & 5 & 6 \\
+7 & 8 & 10
+\end{vmatrix} = -3
+```
+
+```python
+print("这应该是普通代码块，不是公式")
+```
 """.trimIndent()
