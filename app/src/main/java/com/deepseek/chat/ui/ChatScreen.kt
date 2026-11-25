@@ -47,6 +47,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -118,12 +119,29 @@ fun ChatScreen(
 
     // 列表用 reverseLayout 贴底（越靠前的 item 越靠视觉底部）：内容长高时由布局直接吸收，
     // 不需要每来一个字就手动 scroll，也就不存在「先长出来、下一帧再弹回」的上下跳。
-    // 打开会话 / 自己发消息时一次性回到底部；其余时候不打扰用户的阅读位置。
+    //
+    // 但「新 item 插入」不会自动跟随：工具卡片（TOOL_STEP）是追加到 messages 末尾的，
+    // reverseLayout + key 会把原来的可见 item 钉住，新卡片落在视口下方。
+    // 所以这里记录「用户是否想跟底」：只在用户手动滚动结束/程序滚动结束时更新，
+    // 插入新 item 不会把状态误判成「用户上翻过」。
+    var followBottom by remember { mutableStateOf(true) }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
+            if (!scrolling) {
+                // reverseLayout：index 0 + offset 0 才是真正贴底
+                followBottom = listState.firstVisibleItemIndex == 0 &&
+                    listState.firstVisibleItemScrollOffset == 0
+            }
+        }
+    }
+    // 打开/切换会话：直接贴底
     LaunchedEffect(conversation?.id) {
+        followBottom = true
         if (state.messages.isNotEmpty() || state.streaming) listState.scrollToItem(0)
     }
-    LaunchedEffect(messages.size) {
-        if (messages.lastOrNull()?.role == Role.USER) listState.scrollToItem(0)
+    // 新消息 / 工具卡片插入或隐藏 / 流式重新开始：贴底时平滑跟到底
+    LaunchedEffect(messages.size, state.streaming, state.toolStatus) {
+        if (followBottom) listState.animateScrollToItem(0)
     }
     LaunchedEffect(state.notice) {
         val notice = state.notice

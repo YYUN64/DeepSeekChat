@@ -117,3 +117,4 @@ app/src/main/java/com/deepseek/chat/
 - 上下文用量：优先用服务端最近一次返回的 `usage` 做锚点（`prompt + completion` 即该轮完整 token），锚点之后新增的消息才用启发式估算补齐；还没有实测数据时整体走估算，此时界面显示 `≈`。启发式为中文按 1 字 ≈ 1 token、其它 4 字符 ≈ 1 token、每张图 1024 token，与真实计费有偏差，以回答下方的服务端 usage 为准。
 - `tools/` 下是开发期的自检脚本（括号配平、import 一致性、Markdown/SSE 解析逻辑的等价实现测试），跑 `node tools/check-brackets.js app/src/main/java` 即可，不参与 App 构建。
 - 数学公式由 [JLaTeXMath-Android](https://github.com/noties/jlatexmath-android)（`ru.noties:jlatexmath-android`，许可证 **GPL-2.0**）渲染成图片；内置提示词会引导模型用 `$$...$$` / `\[...\]` / `\(...\)` 输出公式，模型仍输出别的写法时按文本安全兜底。若要把这个 App 作为闭源商业应用分发，需要先处理该依赖的 GPL 许可（这个项目是自用侧载，不受影响）。
+- MCP 的 Bearer token 是**明文经 HTTP 发送**的：公网部署请给 MCP 服务器加 HTTPS 反向代理（nginx + certbot）或走 WireGuard / Tailscale，别在不信任的网络上用裸 `http://`（设置页 Token 下方也有这条提示）。

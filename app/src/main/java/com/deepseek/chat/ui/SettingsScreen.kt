@@ -68,6 +68,7 @@ fun SettingsScreen(
     onBack: () -> Unit
 ) {
     var showKey by remember { mutableStateOf(false) }
+    var showToken by remember { mutableStateOf(false) }
     var showContextPicker by remember { mutableStateOf(false) }
     var showOutputPicker by remember { mutableStateOf(false) }
     val level = Reasoning.levelOf(settings.thinking, settings.effort)
@@ -329,9 +330,28 @@ fun SettingsScreen(
                         label = { Text("Token（可选）") },
                         placeholder = { Text("与服务端 MCP_TOKEN 一致，留空表示不鉴权") },
                         singleLine = true,
+                        visualTransformation = if (showToken) {
+                            VisualTransformation.None
+                        } else {
+                            PasswordVisualTransformation()
+                        },
+                        trailingIcon = {
+                            IconButton(onClick = { showToken = !showToken }) {
+                                Icon(
+                                    imageVector = if (showToken) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                                    contentDescription = if (showToken) "隐藏 token" else "显示 token"
+                                )
+                            }
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp)
+                    )
+                    Text(
+                        text = "token 以明文经 HTTP 发送；公网使用请走 HTTPS 反向代理、WireGuard 或 Tailscale，不要直接裸奔 http://。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 4.dp)
                     )
                     Text(
                         text = "工具调用轮数",

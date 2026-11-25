@@ -6,6 +6,8 @@
 - 裸 `\begin{pmatrix}` / `\begin{vmatrix}` / `\begin{bmatrix}` / `\begin{aligned}`（无 `$$`、无围栏）继续按块级公式渲染
 - 公式渲染失败时打 `Log.w("MathRenderer", ...)`，并给 JLaTeXMath 加了 R8 keep 规则，避免 release 包把库裁掉后静默回退
 - debug 包新增「公式预览（debug）」桌面入口：装了 debug 包可直接打开看 ` ```math `、`$$...$$`、行内 `\(x^2\)`、`\frac{a}{b}` 的实际渲染结果
+- MCP Token 输入框默认遮挡显示（右侧眼睛图标可临时显示），token 不会写进任何日志；下方新增提示：token 以明文经 HTTP 发送，公网请走 HTTPS 反代 / WireGuard / Tailscale
+- 工具调用卡片插入/完成、流式重新开始时，只要用户还在底部就自动平滑跟随到底；手动上翻后不再被拽回（参考 DeepSeek 官方 chat-demo 的 sticky 跟随策略）
 
 ## 修复（v1.4.0）
 
