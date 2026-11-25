@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -56,6 +57,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.deepseek.chat.data.ContextLimits
+import com.deepseek.chat.data.McpKeyStatus
 import com.deepseek.chat.data.McpSigner
 import com.deepseek.chat.data.Models
 import com.deepseek.chat.data.Reasoning
@@ -73,6 +75,18 @@ fun SettingsScreen(
     onBack: () -> Unit
 ) {
     var showKey by remember { mutableStateOf(false) }
+    // MCP 密钥：公钥只在生成的那一刻放进内存，关闭弹层就丢弃（不持久化）
+    var keyId by remember { mutableStateOf(McpSigner.keyId()) }
+    var showKeyPage by remember { mutableStateOf(false) }
+    var showRegenerateConfirm by remember { mutableStateOf(false) }
+    var oneTimePublicKey by remember { mutableStateOf<String?>(null) }
+    val clipboard = LocalClipboardManager.current
+    fun generateKeyNow() {
+        if (McpSigner.generateKey()) {
+            keyId = McpSigner.keyId()
+            oneTimePublicKey = McpSigner.publicKeySpkiBase64()
+        }
+    }
     var showContextPicker by remember { mutableStateOf(false) }
     var showOutputPicker by remember { mutableStateOf(false) }
     val level = Reasoning.levelOf(settings.thinking, settings.effort)
@@ -329,65 +343,42 @@ fun SettingsScreen(
                         modifier = Modifier.padding(bottom = 10.dp)
                     )
 
-                    // 密钥鉴权：私钥在 Android Keystore（不可导出），服务端只存公钥
-                    var publicKey by remember { mutableStateOf(McpSigner.publicKeySpkiBase64()) }
-                    var keyId by remember { mutableStateOf(McpSigner.keyId()) }
-                    val clipboard = LocalClipboardManager.current
+                    // 密钥鉴权：私钥在 Android Keystore（不可导出），公钥只在生成时一次性展示
                     Text(
-                        text = "密钥鉴权（推荐）",
+                        text = "MCP 密钥",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.padding(top = 16.dp)
                     )
-                    if (publicKey == null) {
-                        Text(
-                            text = "未生成。生成后把公钥复制到服务器的 authorized_keys（系统级默认 /etc/mcp/authorized_keys，用户级默认 ~/.config/pocket-mcp/authorized_keys）。私钥保存在 Android Keystore，不可导出；换机/重装需要重新生成并替换服务器上的旧公钥。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(vertical = 4.dp)
-                        )
-                        TextButton(onClick = {
-                            if (McpSigner.generateKey()) {
-                                publicKey = McpSigner.publicKeySpkiBase64()
-                                keyId = McpSigner.keyId()
-                            }
-                        }) { Text("生成密钥") }
-                    } else {
-                        Text(
-                            text = "已启用 · key id ${keyId.orEmpty()}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-                        SelectionContainer {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { showKeyPage = true }
+                            .padding(vertical = 10.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = publicKey.orEmpty(),
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = FontFamily.Monospace
-                                ),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(vertical = 4.dp)
+                                text = McpKeyStatus.label(keyId),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (keyId == null) {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                } else {
+                                    MaterialTheme.colorScheme.primary
+                                }
+                            )
+                            Text(
+                                text = "私钥在 Android Keystore（不可导出）；公钥只在生成时显示一次",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Row(
-                            modifier = Modifier.horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            TextButton(onClick = {
-                                clipboard.setText(AnnotatedString(publicKey.orEmpty()))
-                            }) { Text("复制公钥") }
-                            TextButton(onClick = {
-                                if (McpSigner.generateKey()) {
-                                    publicKey = McpSigner.publicKeySpkiBase64()
-                                    keyId = McpSigner.keyId()
-                                }
-                            }) { Text("重新生成") }
-                            TextButton(onClick = {
-                                McpSigner.deleteKey()
-                                publicKey = null
-                                keyId = null
-                            }) { Text("删除") }
-                        }
+                        Text(
+                            text = "›",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                     Text(
                         text = "工具调用轮数",
@@ -523,6 +514,114 @@ fun SettingsScreen(
                 value.toIntOrNull()?.let { onChange(settings.copy(maxOutputTokens = it)) }
             },
             onDismiss = { showOutputPicker = false }
+        )
+    }
+
+    // ---- MCP 密钥：二级弹层 + 二次确认 + 一次性公钥展示 ----
+    if (showKeyPage) {
+        AlertDialog(
+            onDismissRequest = { showKeyPage = false },
+            title = { Text("MCP 密钥") },
+            text = {
+                Column {
+                    Text(
+                        text = if (keyId == null) {
+                            "还没有生成密钥。生成后公钥只显示这一次，关闭后无法再次查看。"
+                        } else {
+                            "已生成\nkey id：${McpKeyStatus.fingerprint(keyId)}"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "私钥保存在 Android Keystore，不可导出；服务端只存公钥。" +
+                            "公钥加到 ~/.config/pocket-mcp/authorized_keys（用户级）或 " +
+                            "/etc/mcp/authorized_keys（系统级，sudo）。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                if (keyId == null) {
+                    TextButton(onClick = {
+                        showKeyPage = false
+                        generateKeyNow()
+                    }) { Text("生成密钥") }
+                } else {
+                    TextButton(onClick = { showRegenerateConfirm = true }) {
+                        Text("重新生成", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showKeyPage = false }) { Text("关闭") }
+            }
+        )
+    }
+
+    if (showRegenerateConfirm) {
+        AlertDialog(
+            onDismissRequest = { showRegenerateConfirm = false },
+            title = { Text("重新生成密钥？") },
+            text = {
+                Text(
+                    "旧公钥会立刻失效。你需要把新公钥加到服务器的 authorized_keys 并删掉旧行，" +
+                        "否则 App 会连不上。"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showRegenerateConfirm = false
+                    showKeyPage = false
+                    generateKeyNow()
+                }) {
+                    Text("确认重新生成", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRegenerateConfirm = false }) { Text("取消") }
+            }
+        )
+    }
+
+    val generatedKey = oneTimePublicKey
+    if (generatedKey != null) {
+        AlertDialog(
+            onDismissRequest = { oneTimePublicKey = null },
+            title = { Text("公钥（只显示这一次）") },
+            text = {
+                Column {
+                    Text(
+                        text = "复制后加到服务器的 authorized_keys（用户级 ~/.config/pocket-mcp/authorized_keys，" +
+                            "系统级 /etc/mcp/authorized_keys），删掉旧行，再点「测试连接」。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    SelectionContainer {
+                        Text(
+                            text = generatedKey,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    }
+                    Text(
+                        text = "关闭后无法再次查看；需要再次使用时必须重新生成。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    TextButton(onClick = {
+                        clipboard.setText(AnnotatedString(generatedKey))
+                    }) { Text("复制公钥") }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { oneTimePublicKey = null }) { Text("我已复制，关闭") }
+            }
         )
     }
 }
