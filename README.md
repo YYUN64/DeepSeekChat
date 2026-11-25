@@ -18,12 +18,12 @@
 | --- | --- |
 | 图片上传 | 从相册选图，自动缩放（最长边 1600px）并按 EXIF 旋转，以 base64 内联发送；使用 `deepseek-flash` 的原生视觉能力（支持 JPEG/PNG/GIF/WebP） |
 | 联网 | 声明服务端工具 `deepseek_web_search` + `deepseek_read_url`：模型自己决定是否搜索、是否读取消息里的链接，搜索和抓取都在 DeepSeek 服务端完成；回答下方展示「参考来源」。设置里可关闭（默认开），搜索/抓取按次计费 |
-| MCP | 可选（默认关）：设置里填 MCP 服务器 IPv4 + 端口（`http://<ip>:<port>/mcp`）、Token（可选，对应服务端 `MCP_TOKEN`）和「密钥鉴权」（RSA-2048，私钥在 Android Keystore 不可导出，公钥贴到服务端 `authorized_keys`，优先于 token），App 作为 MCP 客户端把工具交给模型调用，工具真实执行在 MCP 服务器上；工具调用轮数可选 2/4/8/不限（内部上限 64）；支持「测试连接」列出工具名。开启时自动关闭上面的服务端联网工具。配套服务器已拆分为独立仓库 [pocket-mcp](https://github.com/YYUN64/pocket-mcp)：纯标准库单文件 Python，Linux/Windows 均可部署，支持 Bearer token 与公钥签名鉴权 |
+| MCP | 可选（默认关）：设置里填 MCP 服务器 IPv4 + 端口，**默认走 HTTPS**（服务端可用 `--tls-selfsigned` 一键生成 10 年自签证书，不需要域名/证书机构；首次连接弹窗核对证书指纹后信任，指纹变化会拒绝，可在设置里「重置信任」）；「密钥鉴权」用 RSA-2048 请求签名（私钥在 Android Keystore 不可导出，公钥**只在生成时显示一次**、贴到服务端 `authorized_keys`；App 不再保存/发送 token，服务端仍兼容 Bearer token）；App 作为 MCP 客户端把工具交给模型调用，工具真实执行在 MCP 服务器上；工具调用轮数可选 2/4/8/不限（内部上限 64）；支持「测试连接」列出工具名。开启时自动关闭上面的服务端联网工具。配套服务器已拆分为独立仓库 [pocket-mcp](https://github.com/YYUN64/pocket-mcp)：纯标准库单文件 Python，Linux/Windows 均可部署，支持公钥签名鉴权、Bearer token（legacy）与 TLS |
 | 思考深度 | 四档「推理等级」：关闭 / 低 / 高 / 极致（与 DeepSeek Harness 的 off/low/high/max 一致）；思考过程以可折叠面板展示，流式输出 |
 | 会话历史 | 每个会话一个 JSON 文件，自动命名、重命名、删除、清空；重启后自动恢复最近会话 |
 | 上下文长度 | 16K / 32K / 64K / 128K / 256K / 512K / 1M 可选，超出预算自动丢弃最早的对话；顶栏实时显示估算用量 |
 
-另外还有：流式打字机输出（SSE）、Markdown 渲染（表格、代码块底色 + 一键复制、**LaTeX 数学公式**）、停止生成、重新生成、复制回答、深色模式、系统提示词、自定义 Base URL（可接任意 OpenAI 兼容网关）、token 用量展示。
+另外还有：流式打字机输出（SSE）、Markdown 渲染（表格、代码块底色 + 一键复制、**LaTeX 数学公式**）、停止生成、重新生成、复制回答、**复制整段对话**（历史抽屉「复制内容」，转 Markdown）、生成期间静默前台服务（切后台/锁屏不中断）、会话删除/清空二次确认、深色模式、系统提示词、自定义 Base URL（可接任意 OpenAI 兼容网关）、token 用量展示。
 
 ## 环境与构建
 

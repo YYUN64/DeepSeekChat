@@ -14,6 +14,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
 import com.deepseek.chat.data.ImageRef
 import kotlinx.coroutines.launch
 
@@ -108,6 +116,43 @@ fun DeepSeekApp(state: ChatUiState, vm: ChatViewModel) {
             onClearNotice = { vm.clearNotice() },
             onSetModel = { model -> vm.setModel(model) },
             onSetReasoning = { level -> vm.setReasoning(level) }
+        )
+    }
+
+    // 聊天里首次连接：同样的 TOFU 确认框；信任后自动重发刚才那条，取消则输入框原样保留
+    val pendingCert = state.pendingCertFingerprint
+    if (pendingCert != null) {
+        AlertDialog(
+            onDismissRequest = { vm.dismissPendingCert() },
+            title = { Text("首次连接，确认服务器证书？") },
+            text = {
+                Column {
+                    Text(
+                        text = "服务器证书指纹（SHA-256）：",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = pendingCert,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(vertical = 6.dp)
+                    )
+                    Text(
+                        text = "和服务器启动日志或 openssl 输出核对一致后再信任；以后指纹变了会拒绝连接。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.trustPendingCert() }) { Text("信任并重试") }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.dismissPendingCert() }) { Text("取消") }
+            }
         )
     }
 }

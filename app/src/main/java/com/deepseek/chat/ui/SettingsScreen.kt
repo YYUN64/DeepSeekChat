@@ -333,7 +333,7 @@ fun SettingsScreen(
                     }
                     SwitchRow(
                         label = "使用 HTTPS",
-                        description = "服务器配好证书后开启（需要域名 + 有效 CA 证书；裸 IP 签不了 Let's Encrypt）",
+                        description = "默认通过 HTTPS 连接。服务端可用 --tls-selfsigned 生成 10 年自签证书，首次连接核对指纹后信任；不需要域名或证书机构。纯 HTTP 只建议在局域网或已加密隧道里使用",
                         checked = settings.mcpHttps,
                         onCheckedChange = { enabled ->
                             // 切换协议后旧的会话/工具状态不再适用，清掉本轮的工具缓存

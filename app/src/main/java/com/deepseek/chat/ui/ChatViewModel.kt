@@ -10,6 +10,8 @@ import com.deepseek.chat.ChatService
 import com.deepseek.chat.data.ApiException
 import com.deepseek.chat.data.CertMismatchException
 import com.deepseek.chat.data.ConversationMarkdown
+import com.deepseek.chat.data.McpEndpoint
+import com.deepseek.chat.data.McpTls
 import com.deepseek.chat.data.UntrustedCertException
 import com.deepseek.chat.data.BuiltinPrompts
 import com.deepseek.chat.data.ChatStore
@@ -57,7 +59,9 @@ data class ChatUiState(
     /** 正在执行的工具名（MCP），null 表示没有 */
     val toolStatus: String? = null,
     /** 首次连接时待用户确认的证书指纹（TOFU）；null 表示没有待确认 */
-    val pendingCertFingerprint: String? = null
+    val pendingCertFingerprint: String? = null,
+    /** 待确认来自聊天里的一次发送（信任后自动重发），而不是设置页的「测试连接」 */
+    val pendingCertRetryChat: Boolean = false
 ) {
     val messages: List<Msg> get() = conversation?.messages.orEmpty()
 }
@@ -359,6 +363,39 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(showSettings = true, error = "请先在设置里填好 API Key") }
             return
         }
+
+        // 首次连接（HTTPS 且还没信任过证书）：先探测指纹并让用户确认，确认前不发任何请求，
+        // 输入框保持原样；取消时用户打的字不会丢。
+        val settings = snapshot.settings
+        if (settings.mcpEnabled && settings.mcpHttps &&
+            settings.mcpCertFingerprint.isBlank() && settings.mcpHost.isNotBlank()
+        ) {
+            viewModelScope.launch {
+                val probe = withContext(Dispatchers.IO) {
+                    runCatching {
+                        McpTls.probeFingerprint(McpEndpoint.hostOnly(settings.mcpHost), settings.mcpPort)
+                    }
+                }
+                probe.onSuccess { fingerprint ->
+                    _state.update {
+                        it.copy(pendingCertFingerprint = fingerprint, pendingCertRetryChat = true)
+                    }
+                }.onFailure {
+                    // 探测失败（网络不通等）就按正常流程走，让真实请求给出错误信息
+                    proceedSend(snapshot)
+                }
+            }
+            return
+        }
+
+        proceedSend(snapshot)
+    }
+
+    /** 真正把用户消息加入会话并发起请求（send/重试共用） */
+    private fun proceedSend(snapshot: ChatUiState) {
+        val text = snapshot.input.trim()
+        val images = snapshot.pendingImages
+        if (text.isEmpty() && images.isEmpty()) return
 
         val base = snapshot.conversation ?: ensureConversation()
         val userMsg = Msg(
@@ -889,13 +926,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** 用户确认首次连接的证书指纹：存下 pin 并立刻重试一次 */
+    /** 用户确认首次连接的证书指纹：存下 pin 并立刻重试（聊天里是重发刚才那条） */
     fun trustPendingCert() {
-        val fingerprint = _state.value.pendingCertFingerprint ?: return
-        val updated = _state.value.settings.copy(mcpCertFingerprint = fingerprint)
+        val current = _state.value
+        val fingerprint = current.pendingCertFingerprint ?: return
+        val retryChat = current.pendingCertRetryChat
+        val updated = current.settings.copy(mcpCertFingerprint = fingerprint)
         settingsStore.save(updated)
-        _state.update { it.copy(settings = updated, pendingCertFingerprint = null) }
-        testMcp()
+        _state.update {
+            it.copy(
+                settings = updated,
+                pendingCertFingerprint = null,
+                pendingCertRetryChat = false
+            )
+        }
+        if (retryChat) send() else testMcp()
     }
 
     /** 清除已信任的证书指纹（下次连接重新走首次确认） */
@@ -905,9 +950,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(settings = updated, pendingCertFingerprint = null) }
     }
 
-    /** 取消首次连接确认 */
+    /** 取消首次连接确认（输入框内容保持原样） */
     fun dismissPendingCert() {
-        _state.update { it.copy(pendingCertFingerprint = null) }
+        _state.update { it.copy(pendingCertFingerprint = null, pendingCertRetryChat = false) }
     }
 
     fun updateSettings(settings: Settings) {
