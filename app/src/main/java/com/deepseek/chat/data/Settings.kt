@@ -22,6 +22,8 @@ data class Settings(
     val mcpHttps: Boolean = true,
     /** 已信任的服务器证书指纹（TOFU）；空表示还没信任过 */
     val mcpCertFingerprint: String = "",
+    /** 被用户关掉的 MCP 工具名（关闭的工具不发给模型） */
+    val disabledMcpTools: Set<String> = emptySet(),
     /** 单次提问最多几轮工具调用；64 表示「不限」（内部上限 64，避免死循环） */
     val mcpMaxRounds: Int = DEFAULT_MCP_ROUNDS
 ) {
@@ -64,6 +66,8 @@ class SettingsStore(context: Context) {
         mcpPort = prefs.getInt(KEY_MCP_PORT, Settings.DEFAULT_MCP_PORT),
         mcpHttps = prefs.getBoolean(KEY_MCP_HTTPS, true),
         mcpCertFingerprint = prefs.getString(KEY_MCP_CERT_FP, "").orEmpty(),
+        disabledMcpTools = prefs.getStringSet(KEY_MCP_DISABLED_TOOLS, emptySet())
+            ?.toSet().orEmpty(),
         mcpMaxRounds = prefs.getInt(KEY_MCP_ROUNDS, Settings.DEFAULT_MCP_ROUNDS)
     )
 
@@ -84,6 +88,7 @@ class SettingsStore(context: Context) {
             .putInt(KEY_MCP_PORT, settings.mcpPort)
             .putBoolean(KEY_MCP_HTTPS, settings.mcpHttps)
             .putString(KEY_MCP_CERT_FP, settings.mcpCertFingerprint)
+            .putStringSet(KEY_MCP_DISABLED_TOOLS, settings.disabledMcpTools)
             .putInt(KEY_MCP_ROUNDS, settings.mcpMaxRounds)
             .apply()
     }
@@ -104,6 +109,7 @@ class SettingsStore(context: Context) {
         const val KEY_MCP_PORT = "mcp_port"
         const val KEY_MCP_HTTPS = "mcp_https"
         const val KEY_MCP_CERT_FP = "mcp_cert_fingerprint"
+        const val KEY_MCP_DISABLED_TOOLS = "mcp_disabled_tools"
         const val KEY_MCP_ROUNDS = "mcp_max_rounds"
     }
 }

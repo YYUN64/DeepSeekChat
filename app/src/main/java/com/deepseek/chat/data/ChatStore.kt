@@ -123,6 +123,10 @@ class ChatStore(root: File) {
         if (msg.toolCallId != null) json.put("toolCallId", msg.toolCallId)
         if (msg.toolName != null) json.put("toolName", msg.toolName)
         if (msg.toolArgs != null) json.put("toolArgs", msg.toolArgs)
+        if (msg.toolDurationMs != null) json.put("toolDurationMs", msg.toolDurationMs)
+        if (msg.toolExitCode != null) json.put("toolExitCode", msg.toolExitCode)
+        if (msg.toolTimedOut) json.put("toolTimedOut", true)
+        if (msg.toolTimeoutSeconds != null) json.put("toolTimeoutSeconds", msg.toolTimeoutSeconds)
         if (msg.intermediate) json.put("intermediate", true)
         val usage = msg.usage
         if (usage != null) {
@@ -182,6 +186,14 @@ class ChatStore(root: File) {
             toolCallId = json.optString("toolCallId").takeIf { it.isNotBlank() },
             toolName = json.optString("toolName").takeIf { it.isNotBlank() },
             toolArgs = json.optString("toolArgs").takeIf { it.isNotBlank() },
+            toolDurationMs = if (json.has("toolDurationMs")) json.optLong("toolDurationMs") else null,
+            toolExitCode = if (json.has("toolExitCode")) json.optInt("toolExitCode") else null,
+            toolTimedOut = json.optBoolean("toolTimedOut", false),
+            toolTimeoutSeconds = if (json.has("toolTimeoutSeconds")) {
+                json.optInt("toolTimeoutSeconds")
+            } else {
+                null
+            },
             intermediate = json.optBoolean("intermediate", false)
         )
         // 上次进程在工具执行中途被杀：卡片不能永远停在「执行中…」

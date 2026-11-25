@@ -1,5 +1,7 @@
 package com.deepseek.chat.ui
 
+import com.deepseek.chat.data.ToolCallMeta
+import com.deepseek.chat.data.ToolStatus
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -272,9 +274,17 @@ private fun ToolStepCard(msg: Msg) {
                 Spacer(modifier = Modifier.weight(1f))
                 Text(
                     text = when {
-                        failed -> "失败"
                         running -> "执行中…"
-                        else -> "完成"
+                        else -> ToolStatus.label(
+                            ToolCallMeta(
+                                dispatched = true,
+                                code = msg.toolExitCode,
+                                durationMs = msg.toolDurationMs,
+                                timedOut = msg.toolTimedOut,
+                                timeoutSeconds = msg.toolTimeoutSeconds
+                            ),
+                            failed
+                        )
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = if (failed) MaterialTheme.colorScheme.error

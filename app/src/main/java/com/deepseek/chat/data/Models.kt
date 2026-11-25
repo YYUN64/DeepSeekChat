@@ -54,6 +54,13 @@ data class Msg(
     val toolCallId: String? = null,
     /** role=tool_step 时展示用的工具名 */
     val toolName: String? = null,
+    /** 工具执行耗时（来自服务端 _meta，毫秒） */
+    val toolDurationMs: Long? = null,
+    /** run_command 的退出码（_meta.code） */
+    val toolExitCode: Int? = null,
+    /** 服务端超时（_meta.timeout） */
+    val toolTimedOut: Boolean = false,
+    val toolTimeoutSeconds: Int? = null,
     /** role=tool_step 时展示用的参数摘要 */
     val toolArgs: String? = null,
     /**

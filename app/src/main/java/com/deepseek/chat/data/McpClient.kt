@@ -48,15 +48,25 @@ class McpClient(
     }
 
     fun initialize() {
-        call(
+        val result = call(
             "initialize",
             JSONObject()
                 .put("protocolVersion", "2025-06-18")
                 .put("capabilities", JSONObject())
                 .put("clientInfo", JSONObject().put("name", "deepseek-lite").put("version", "1.1.0"))
         ) ?: throw ApiException("MCP 初始化没有返回结果")
+        result.optJSONObject("serverInfo")?.let { info ->
+            serverName = info.optString("name").trim()
+            serverVersion = info.optString("version").trim()
+        }
         runCatching { notify("notifications/initialized", JSONObject()) }
     }
+
+    /** initialize 返回的 serverInfo（设置里展示「服务端：name version」） */
+    var serverName: String = ""
+        private set
+    var serverVersion: String = ""
+        private set
 
     fun listTools(): List<McpTool> {
         val result = call("tools/list", JSONObject()) ?: return emptyList()
@@ -73,17 +83,32 @@ class McpClient(
         return out
     }
 
-    fun callTool(name: String, argumentsJson: String): String {
+    /** 工具调用结果 + 服务端 _meta（耗时/退出码/超时） */
+    data class ToolCallResult(
+        val text: String,
+        val meta: ToolCallMeta?,
+        val failed: Boolean
+    )
+
+    fun callToolWithMeta(name: String, argumentsJson: String): ToolCallResult {
         val arguments = runCatching {
             JSONObject(argumentsJson.ifBlank { "{}" })
         }.getOrDefault(JSONObject())
         val result = call(
             "tools/call",
             JSONObject().put("name", name).put("arguments", arguments)
-        ) ?: return "（工具没有返回内容）"
+        ) ?: return ToolCallResult("（工具没有返回内容）", null, false)
         val text = extractText(result)
-        return if (result.optBoolean("isError", false)) "工具执行失败：$text" else text
+        val failed = result.optBoolean("isError", false)
+        return ToolCallResult(
+            text = if (failed) "工具执行失败：$text" else text,
+            meta = ToolCallMeta.parse(result.optJSONObject("_meta")),
+            failed = failed
+        )
     }
+
+    fun callTool(name: String, argumentsJson: String): String =
+        callToolWithMeta(name, argumentsJson).text
 
     private fun extractText(result: JSONObject): String {
         val content = result.optJSONArray("content") ?: return result.toString()

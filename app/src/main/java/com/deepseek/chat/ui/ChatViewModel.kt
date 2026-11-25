@@ -11,6 +11,8 @@ import com.deepseek.chat.data.ApiException
 import com.deepseek.chat.data.CertMismatchException
 import com.deepseek.chat.data.ConversationMarkdown
 import com.deepseek.chat.data.McpEndpoint
+import com.deepseek.chat.data.McpTool
+import com.deepseek.chat.data.McpToolFilter
 import com.deepseek.chat.data.McpTls
 import com.deepseek.chat.data.UntrustedCertException
 import com.deepseek.chat.data.BuiltinPrompts
@@ -61,7 +63,11 @@ data class ChatUiState(
     /** 首次连接时待用户确认的证书指纹（TOFU）；null 表示没有待确认 */
     val pendingCertFingerprint: String? = null,
     /** 待确认来自聊天里的一次发送（信任后自动重发），而不是设置页的「测试连接」 */
-    val pendingCertRetryChat: Boolean = false
+    val pendingCertRetryChat: Boolean = false,
+    /** 上次「测试连接」拿到的工具列表（设置页展示 + 开关） */
+    val mcpTools: List<McpTool> = emptyList(),
+    /** 服务端标识：name version（来自 initialize 的 serverInfo） */
+    val mcpServerLabel: String? = null
 ) {
     val messages: List<Msg> get() = conversation?.messages.orEmpty()
 }
@@ -517,11 +523,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     mcp = prepared.first
                     val tools = prepared.second
+                    val enabled = McpToolFilter.enabledTools(tools, settings.disabledMcpTools)
                     if (tools.isEmpty()) {
                         mcp = null
                         _state.update { it.copy(notice = "MCP 服务器没有提供工具，本轮用普通对话") }
+                    } else if (enabled.isEmpty()) {
+                        mcp = null
+                        _state.update {
+                            it.copy(notice = "所有 MCP 工具都被关掉了，本轮用普通对话（可在设置里打开）")
+                        }
                     } else {
-                        functionTools = McpClient.toOpenAiTools(tools).toString()
+                        functionTools = McpClient.toOpenAiTools(enabled).toString()
                     }
                 } catch (e: CancellationException) {
                     throw e
@@ -663,18 +675,25 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         _state.update { it.copy(toolStatus = "正在调用工具：$name") }
                         var failed = false
                         var failureReason: Throwable? = null
-                        val output = withContext(Dispatchers.IO) {
-                            runCatching { activeMcp.callTool(name, arguments) }
-                                .onFailure {
-                                    failed = true
-                                    failureReason = it
-                                }
-                                .getOrElse { "工具调用失败：${it.message}" }
+                        var callResult: McpClient.ToolCallResult? = null
+                        val outcome = withContext(Dispatchers.IO) {
+                            runCatching { activeMcp.callToolWithMeta(name, arguments) }
                         }
+                        callResult = outcome.getOrNull()
+                        if (callResult?.failed == true) failed = true
+                        val output: String = outcome.fold(
+                            onSuccess = { it.text },
+                            onFailure = { error ->
+                                failed = true
+                                failureReason = error
+                                "工具调用失败：${error.message}"
+                            }
+                        )
                         // 45 秒工具超时：卡片标成失败并把原因写进本轮结果，循环继续（不会整体挂住）
                         val timedOut = failureReason is java.net.SocketTimeoutException ||
                             (failureReason?.message ?: "").contains("timed out", ignoreCase = true) ||
                             (failureReason?.message ?: "").contains("timeout", ignoreCase = true)
+                        val meta = callResult?.meta
                         updateVisible(conversation.id, myRound, stepId) {
                             it.copy(
                                 text = if (failed) "" else summarize(output, 400),
@@ -682,7 +701,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                                     !failed -> null
                                     timedOut -> "执行超时（45 秒）：$name"
                                     else -> "调用失败：$name：${summarize(output, 180)}"
-                                }
+                                },
+                                toolDurationMs = meta?.durationMs,
+                                toolExitCode = meta?.code,
+                                toolTimedOut = meta?.timedOut == true,
+                                toolTimeoutSeconds = meta?.timeoutSeconds
                             )
                         }
                         val toolResult = if (timedOut) {
@@ -914,7 +937,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         getApplication()
                     )
                     client.initialize()
-                    client.listTools()
+                    client to client.listTools()
                 }
             }
             val failure = result.exceptionOrNull()
@@ -935,18 +958,44 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
                 }
-                else -> _state.update {
-                    it.copy(
-                        notice = result.fold(
-                            onSuccess = { tools ->
-                                if (tools.isEmpty()) "连上了，但服务器没有提供工具"
-                                else "MCP 连接成功，工具：" + tools.joinToString("、") { tool -> tool.name }
-                            },
-                            onFailure = { e -> "MCP 连接失败：${e.message}" }
+                else -> result.onSuccess { (client, tools) ->
+                    val label = listOf(client.serverName, client.serverVersion)
+                        .filter { it.isNotBlank() }
+                        .joinToString(" ")
+                        .ifBlank { null }
+                    _state.update {
+                        it.copy(
+                            mcpTools = tools,
+                            mcpServerLabel = label,
+                            notice = if (tools.isEmpty()) {
+                                "连上了，但服务器没有提供工具"
+                            } else {
+                                "MCP 连接成功，工具：" + tools.joinToString("、") { tool -> tool.name }
+                            }
                         )
-                    )
+                    }
+                }.onFailure { e ->
+                    _state.update { it.copy(notice = "MCP 连接失败：${e.message}") }
                 }
             }
+        }
+    }
+
+    /** 设置页工具开关：关闭的工具不发给模型（下一轮请求立即生效） */
+    fun setToolEnabled(name: String, enabled: Boolean) {
+        val current = _state.value.settings
+        val disabled = if (enabled) {
+            current.disabledMcpTools - name
+        } else {
+            current.disabledMcpTools + name
+        }
+        val updated = current.copy(disabledMcpTools = disabled)
+        settingsStore.save(updated)
+        _state.update {
+            it.copy(
+                settings = updated,
+                notice = if (enabled) "已启用工具 $name（下一轮生效）" else "已关闭工具 $name（下一轮生效）"
+            )
         }
     }
 

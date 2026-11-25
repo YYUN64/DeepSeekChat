@@ -32,6 +32,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -51,6 +52,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -58,6 +60,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.deepseek.chat.data.ContextLimits
 import com.deepseek.chat.data.McpKeyStatus
+import com.deepseek.chat.data.McpTool
 import com.deepseek.chat.data.McpSigner
 import com.deepseek.chat.data.Models
 import com.deepseek.chat.data.Reasoning
@@ -70,8 +73,11 @@ fun SettingsScreen(
     settings: Settings,
     notice: String?,
     pendingCertFingerprint: String?,
+    mcpTools: List<McpTool>,
+    mcpServerLabel: String?,
     onChange: (Settings) -> Unit,
     onTestMcp: () -> Unit,
+    onToggleTool: (String, Boolean) -> Unit,
     onTrustCert: () -> Unit,
     onResetCertTrust: () -> Unit,
     onDismissPendingCert: () -> Unit,
@@ -378,6 +384,51 @@ fun SettingsScreen(
                     if (settings.mcpCertFingerprint.isNotBlank()) {
                         TextButton(onClick = { showResetCertConfirm = true }) {
                             Text("重置信任", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+
+                    // 服务端信息（只读）：initialize 的 serverInfo + 工具数量
+                    Text(
+                        text = if (mcpServerLabel != null) {
+                            "服务端：$mcpServerLabel · ${mcpTools.size} 个工具"
+                        } else {
+                            "服务端：未连接（点「测试连接」）"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 6.dp)
+                    )
+
+                    // 工具清单：可折叠，每个工具可单独开关（关闭的不发给模型）
+                    if (mcpTools.isNotEmpty()) {
+                        var toolsExpanded by remember { mutableStateOf(true) }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { toolsExpanded = !toolsExpanded }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "工具（${mcpTools.count { it.name !in settings.disabledMcpTools }} / ${mcpTools.size} 启用）",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.weight(1f))
+                            Text(
+                                text = if (toolsExpanded) "收起" else "展开",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        if (toolsExpanded) {
+                            for (tool in mcpTools) {
+                                ToolToggleRow(
+                                    tool = tool,
+                                    enabled = tool.name !in settings.disabledMcpTools,
+                                    onToggle = { onToggleTool(tool.name, it) }
+                                )
+                            }
                         }
                     }
 
@@ -717,5 +768,45 @@ fun SettingsScreen(
                 TextButton(onClick = { showResetCertConfirm = false }) { Text("取消") }
             }
         )
+    }
+}
+
+@Composable
+private fun ToolToggleRow(
+    tool: McpTool,
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(
+                text = tool.name,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            val summary = tool.description.lineSequence().firstOrNull().orEmpty().trim()
+            if (summary.isNotEmpty()) {
+                Text(
+                    text = summary.take(90),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (tool.name == "run_command") {
+                Text(
+                    text = "可执行任意命令",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        }
+        Switch(checked = enabled, onCheckedChange = onToggle)
     }
 }
