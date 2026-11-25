@@ -29,9 +29,17 @@ object TokenCounter {
     }
 
     fun estimateMessage(msg: Msg): Int {
-        // 工具步骤只在界面上展示，不发给模型，也不占上下文
+        // 工具步骤卡只在界面上展示，不发给模型，也不占上下文
         if (msg.role == Role.TOOL_STEP) return 0
+        // tool 结果会真正发给模型：按截断后的长度估算（长输出不按全量算）
+        if (msg.role == Role.TOOL) {
+            return estimate(msg.text.take(2000)) + 4
+        }
         var tokens = estimate(msg.text) + 4
+        // assistant 的 tool_calls JSON 也会发出去
+        if (msg.role == Role.ASSISTANT && !msg.toolCallsJson.isNullOrBlank()) {
+            tokens += estimate(msg.toolCallsJson.take(2000))
+        }
         for (image in msg.images) {
             tokens += IMAGE_TOKENS
         }
@@ -56,7 +64,10 @@ object TokenCounter {
             picked.addFirst(msg)
             used += cost
         }
-        while (picked.isNotEmpty() && picked.first().role == Role.ASSISTANT) {
+        // 裁剪必须从「一条 user 消息」开始：否则可能出现
+        // tool 结果没有对应 assistant(tool_calls)、或 assistant(tool_calls) 没有后续 tool 的残缺组合，
+        // 发给 API 会直接 400。整对工具交换要么一起保留，要么一起丢掉。
+        while (picked.isNotEmpty() && picked.first().role != Role.USER) {
             picked.removeFirst()
         }
         return picked.toList()

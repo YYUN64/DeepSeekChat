@@ -127,6 +127,7 @@ class ChatStore(root: File) {
         if (msg.toolExitCode != null) json.put("toolExitCode", msg.toolExitCode)
         if (msg.toolTimedOut) json.put("toolTimedOut", true)
         if (msg.toolTimeoutSeconds != null) json.put("toolTimeoutSeconds", msg.toolTimeoutSeconds)
+        if (msg.toolCancelled) json.put("toolCancelled", true)
         if (msg.intermediate) json.put("intermediate", true)
         val usage = msg.usage
         if (usage != null) {
@@ -189,6 +190,7 @@ class ChatStore(root: File) {
             toolDurationMs = if (json.has("toolDurationMs")) json.optLong("toolDurationMs") else null,
             toolExitCode = if (json.has("toolExitCode")) json.optInt("toolExitCode") else null,
             toolTimedOut = json.optBoolean("toolTimedOut", false),
+            toolCancelled = json.optBoolean("toolCancelled", false),
             toolTimeoutSeconds = if (json.has("toolTimeoutSeconds")) {
                 json.optInt("toolTimeoutSeconds")
             } else {

@@ -8,7 +8,8 @@ data class ToolCallMeta(
     val code: Int?,
     val durationMs: Long?,
     val timedOut: Boolean,
-    val timeoutSeconds: Int?
+    val timeoutSeconds: Int?,
+    val cancelled: Boolean = false
 ) {
     companion object {
         fun parse(json: JSONObject?): ToolCallMeta? {
@@ -24,7 +25,8 @@ data class ToolCallMeta(
                     json.optInt("timeoutSeconds")
                 } else {
                     null
-                }
+                },
+                cancelled = json.optBoolean("cancelled", false)
             )
         }
     }
@@ -40,6 +42,10 @@ object ToolStatus {
 
     fun label(meta: ToolCallMeta?, failed: Boolean): String {
         if (meta == null) return if (failed) "失败" else "完成"
+        if (meta.cancelled) {
+            val duration = formatDuration(meta.durationMs)
+            return if (duration != null) "已取消 · $duration" else "已取消"
+        }
         if (meta.timedOut) {
             val seconds = meta.timeoutSeconds?.let { "${it}s" } ?: formatDuration(meta.durationMs)
             return if (seconds != null) "超时（$seconds）" else "超时"

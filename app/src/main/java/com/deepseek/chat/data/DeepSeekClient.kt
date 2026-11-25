@@ -1,5 +1,6 @@
 package com.deepseek.chat.data
 
+import com.deepseek.chat.BuildConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -205,9 +206,7 @@ class DeepSeekClient(private val images: ImageStore) {
         val clientTools = functionTools?.takeIf { it.isNotBlank() }
         // 带 tools 时历史里的 reasoning_content 必须回传
         val echoTools = clientTools != null || settings.webTools
-        for (msg in history) {
-            // 工具调用步骤只是界面展示，不参与请求
-            if (msg.role == Role.TOOL_STEP) continue
+        for (msg in payloadMessages(history)) {
             // 每条 user 消息前带一条 latest_reminder：模型每轮都知道今天几号（且不破坏缓存）
             if (msg.role == Role.USER) {
                 messages.put(
@@ -216,16 +215,28 @@ class DeepSeekClient(private val images: ImageStore) {
                         .put("content", LatestReminder.of(msg.createdAt))
                 )
             }
-            // 只有思考内容、没有正文也没有工具调用的 assistant 消息会让接口报 400，直接跳过
-            if (msg.role == Role.ASSISTANT && msg.text.isBlank() && msg.toolCallsJson == null) continue
             messages.put(messageToJson(msg, supportsVision, echoTools, imageBudget))
+        }
+        // debug 构建打印一次请求的 role 序列，便于确认 tool_calls/tool 成对（adb logcat -s DeepSeekPayload）
+        if (BuildConfig.DEBUG) {
+            android.util.Log.d(
+                "DeepSeekPayload",
+                (0 until messages.length()).joinToString(" → ") { index ->
+                    val item = messages.optJSONObject(index)
+                    val role = item?.optString("role").orEmpty()
+                    if (role == "assistant" && item?.has("tool_calls") == true) {
+                        "assistant(tool_calls)"
+                    } else {
+                        role
+                    }
+                }
+            )
         }
         val payload = JSONObject()
             .put("model", model)
             .put("messages", messages)
             .put("stream", true)
-            .put("stream_options", JSONObject().put("include_usage", true))
-            .put("max_tokens", settings.maxOutputTokens)
+            .put("stream_options", JSONObject().put("include_usage", true))            .put("max_tokens", settings.maxOutputTokens)
         if (clientTools != null) {
             // 客户端函数（MCP 工具）。注意：DeepSeek 不允许和 web 工具同时声明
             runCatching { payload.put("tools", JSONArray(clientTools)) }
@@ -361,7 +372,13 @@ class DeepSeekClient(private val images: ImageStore) {
         }
     }
 
-    private companion object {
+    internal companion object {
         const val MAX_IMAGE_BYTES = 4L * 1024 * 1024
+
+        /** 真正发给模型的消息序列：跳过 UI 专用的 TOOL_STEP，保留 assistant(tool_calls) 与配对的 tool */
+        internal fun payloadMessages(messages: List<Msg>): List<Msg> = messages.filterNot { msg ->
+            msg.role == Role.TOOL_STEP ||
+                (msg.role == Role.ASSISTANT && msg.text.isBlank() && msg.toolCallsJson == null)
+        }
     }
 }

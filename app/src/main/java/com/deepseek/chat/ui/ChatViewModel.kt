@@ -34,6 +34,7 @@ import com.deepseek.chat.data.Usage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -83,6 +84,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
 
     private var job: Job? = null
+
+    /** 本轮正在用的 MCP 客户端（点「停止」时要靠它发取消通知） */
+    @Volatile
+    private var activeMcp: McpClient? = null
 
     /** 请求轮次：取消/切换后用来丢弃过期回合的回写 */
     private var round = 0
@@ -466,6 +471,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stop() {
+        val mcp = activeMcp
+        val callId = mcp?.activeCallId
+        if (mcp != null && callId != null) {
+            // 正在跑工具：先发取消，给它最多 3 秒把「已取消 + 部分输出」带回来，再取消协程
+            viewModelScope.launch {
+                withContext(Dispatchers.IO) { mcp.cancelActiveCall() }
+                delay(3000)
+                stopStreaming()
+            }
+            return
+        }
         stopStreaming()
     }
 
@@ -522,6 +538,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         client to client.listTools()
                     }
                     mcp = prepared.first
+                    activeMcp = prepared.first
                     val tools = prepared.second
                     val enabled = McpToolFilter.enabledTools(tools, settings.disabledMcpTools)
                     if (tools.isEmpty()) {
@@ -619,38 +636,27 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     rounds++
 
-                    // 1) 工具调用前这一轮的正文/思考固化成可见消息：
-                    //    思考面板随之从「深度思考中…」变成「已深度思考」，不再和工具卡片抢位置
+                    // 1) 工具调用前这一轮的正文/思考 + tool_calls 合并成**一条** assistant 消息：
+                    //    既用于 UI（正文气泡），也持久化并原样发给模型（tool_calls 必须成对出现）。
                     val segmentText = content.substring(contentStart)
                     val segmentThought = reasoning.substring(reasoningStart)
-                    if (segmentText.isNotBlank() || segmentThought.isNotBlank()) {
-                        appendVisible(
-                            conversation.id,
-                            myRound,
-                            Msg(
-                                id = UUID.randomUUID().toString(),
-                                role = Role.ASSISTANT,
-                                text = segmentText,
-                                reasoning = segmentThought,
-                                model = effectiveModel,
-                                intermediate = true
-                            )
-                        )
-                        sawToolRound = true
-                    }
-                    // 下一轮从空白开始展示，避免和刚固化的内容重复
-                    _state.update { it.copy(streamText = "", streamReasoning = "") }
-                    lastStreamPush = 0L
-
-                    // 2) 带 tool_calls 的 assistant 轮次接进给模型的上下文
-                    requestMessages += Msg(
+                    val toolCallAssistant = Msg(
                         id = UUID.randomUUID().toString(),
                         role = Role.ASSISTANT,
                         text = segmentText,
                         reasoning = segmentThought,
                         toolCallsJson = calls,
-                        model = effectiveModel
+                        model = effectiveModel,
+                        intermediate = true
                     )
+                    appendVisible(conversation.id, myRound, toolCallAssistant)
+                    sawToolRound = true
+                    // 下一轮从空白开始展示，避免和刚固化的内容重复
+                    _state.update { it.copy(streamText = "", streamReasoning = "") }
+                    lastStreamPush = 0L
+
+                    // 2) 带 tool_calls 的 assistant 轮次接进给模型的上下文（本轮）
+                    requestMessages += toolCallAssistant
                     val array = JSONArray(calls)
                     for (index in 0 until array.length()) {
                         val call = array.optJSONObject(index) ?: continue
@@ -694,6 +700,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             (failureReason?.message ?: "").contains("timed out", ignoreCase = true) ||
                             (failureReason?.message ?: "").contains("timeout", ignoreCase = true)
                         val meta = callResult?.meta
+                        // 取消不是失败：卡片显示「已取消 · 1.2s」，保留已捕获输出
+                        if (meta?.cancelled == true) failed = false
                         updateVisible(conversation.id, myRound, stepId) {
                             it.copy(
                                 text = if (failed) "" else summarize(output, 400),
@@ -705,7 +713,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                                 toolDurationMs = meta?.durationMs,
                                 toolExitCode = meta?.code,
                                 toolTimedOut = meta?.timedOut == true,
-                                toolTimeoutSeconds = meta?.timeoutSeconds
+                                toolTimeoutSeconds = meta?.timeoutSeconds,
+                                toolCancelled = meta?.cancelled == true
                             )
                         }
                         val toolResult = if (timedOut) {
@@ -713,12 +722,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         } else {
                             output
                         }
-                        requestMessages += Msg(
+                        // 3) tool 结果也必须持久化：assistant(tool_calls) 与 tool 成对，下一轮模型才看得到
+                        val toolMessage = Msg(
                             id = UUID.randomUUID().toString(),
                             role = Role.TOOL,
                             toolCallId = call.optString("id"),
-                            text = toolResult.take(MAX_TOOL_OUTPUT)
+                            text = toolResult.take(MAX_TOOL_OUTPUT),
+                            intermediate = true
                         )
+                        appendVisible(conversation.id, myRound, toolMessage)
+                        requestMessages += toolMessage
                     }
                     _state.update { it.copy(toolStatus = null) }
                 }
@@ -733,6 +746,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { it.copy(toolStatus = null) }
                 // 停止/异常时正在跑的工具卡片不能永远停在「执行中」
                 markStaleToolSteps(conversation.id, myRound)
+                // 并且要补齐缺失的 tool 结果，保证 tool_calls/tool 成对（否则下一轮请求 400）
+                closeDanglingToolCalls(conversation.id, myRound, "执行已中断（用户停止）")
             }
 
             // 已经被新一轮请求取代：直接丢弃，避免把过期内容写进当前会话。
@@ -814,6 +829,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // 无论正常结束、失败、超时还是被停止，都收起前台服务通知；
         // 兜底保证界面不会停在“转圈”：streaming / toolStatus 一定复位
         job?.invokeOnCompletion {
+            activeMcp = null
             ChatService.stop(getApplication())
             if (myRound == round) {
                 _state.update { it.copy(streaming = false, toolStatus = null) }
@@ -874,8 +890,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** 本轮结束时仍没有结果的工具步骤（被停止/异常）标记为中断，避免卡片一直显示「执行中…」 */
-    private fun markStaleToolSteps(conversationId: String, myRound: Int) {
-        if (myRound != round) return
+    private fun markStaleToolSteps(conversationId: String, myRound: Int) {        if (myRound != round) return
         val current = _state.value.conversation ?: return
         if (current.id != conversationId) return
         val hasRunning = current.messages.any {
@@ -890,6 +905,46 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     it
                 }
             },
+            updatedAt = System.currentTimeMillis()
+        )
+        _state.update { it.copy(conversation = updated) }
+        runCatching { chatStore.save(updated) }
+    }
+
+    /**
+     * 停止/异常时，assistant(tool_calls) 可能缺少对应的 tool 结果。
+     * 补齐「执行已中断（用户停止）」，保证发给模型时 tool_calls/tool 成对（缺了会 400）。
+     */
+    private fun closeDanglingToolCalls(conversationId: String, myRound: Int, reason: String) {
+        if (myRound != round) return
+        val current = _state.value.conversation ?: return
+        if (current.id != conversationId) return
+        val answered = current.messages
+            .filter { it.role == Role.TOOL }
+            .mapNotNull { it.toolCallId }
+            .toMutableSet()
+        val additions = ArrayList<Msg>()
+        for (message in current.messages) {
+            if (message.role != Role.ASSISTANT || message.toolCallsJson.isNullOrBlank()) continue
+            val calls = runCatching { JSONArray(message.toolCallsJson) }.getOrNull() ?: continue
+            for (index in 0 until calls.length()) {
+                val id = calls.optJSONObject(index)?.optString("id").orEmpty()
+                if (id.isBlank() || id in answered) continue
+                answered.add(id)
+                additions.add(
+                    Msg(
+                        id = UUID.randomUUID().toString(),
+                        role = Role.TOOL,
+                        toolCallId = id,
+                        text = reason,
+                        intermediate = true
+                    )
+                )
+            }
+        }
+        if (additions.isEmpty()) return
+        val updated = current.copy(
+            messages = current.messages + additions,
             updatedAt = System.currentTimeMillis()
         )
         _state.update { it.copy(conversation = updated) }

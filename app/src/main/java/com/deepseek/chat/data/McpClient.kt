@@ -83,28 +83,55 @@ class McpClient(
         return out
     }
 
-    /** 工具调用结果 + 服务端 _meta（耗时/退出码/超时） */
+    /** 工具调用结果 + 服务端 _meta（耗时/退出码/超时/取消） */
     data class ToolCallResult(
         val text: String,
         val meta: ToolCallMeta?,
         val failed: Boolean
     )
 
+    /** 正在执行的 tools/call 的 JSON-RPC id（点「停止」时用来发取消通知） */
+    @Volatile
+    var activeCallId: Int? = null
+        private set
+
     fun callToolWithMeta(name: String, argumentsJson: String): ToolCallResult {
         val arguments = runCatching {
             JSONObject(argumentsJson.ifBlank { "{}" })
         }.getOrDefault(JSONObject())
-        val result = call(
-            "tools/call",
-            JSONObject().put("name", name).put("arguments", arguments)
-        ) ?: return ToolCallResult("（工具没有返回内容）", null, false)
+        val callId = nextId
+        activeCallId = callId
+        val result = try {
+            call(
+                "tools/call",
+                JSONObject().put("name", name).put("arguments", arguments)
+            )
+        } finally {
+            activeCallId = null
+        } ?: return ToolCallResult("（工具没有返回内容）", null, false)
         val text = extractText(result)
         val failed = result.optBoolean("isError", false)
+        val meta = ToolCallMeta.parse(result.optJSONObject("_meta"))
         return ToolCallResult(
-            text = if (failed) "工具执行失败：$text" else text,
-            meta = ToolCallMeta.parse(result.optJSONObject("_meta")),
+            text = if (failed && meta?.cancelled != true) "工具执行失败：$text" else text,
+            meta = meta,
             failed = failed
         )
+    }
+
+    /**
+     * 点「停止」时调用：发 MCP 标准的 notifications/cancelled 让服务端杀掉正在跑的命令。
+     * 超时 2 秒，失败就算了（不能阻塞 UI）。
+     */
+    fun cancelActiveCall(timeoutMs: Int = 2000) {
+        val id = activeCallId ?: return
+        runCatching {
+            notify(
+                "notifications/cancelled",
+                JSONObject().put("requestId", id),
+                timeoutMs = timeoutMs
+            )
+        }
     }
 
     fun callTool(name: String, argumentsJson: String): String =
@@ -137,14 +164,15 @@ class McpClient(
         return response.optJSONObject("result")
     }
 
-    private fun notify(method: String, params: JSONObject) {
+    private fun notify(method: String, params: JSONObject, timeoutMs: Int = 0) {
         post(
             JSONObject().put("jsonrpc", "2.0").put("method", method).put("params", params),
-            expectResponse = false
+            expectResponse = false,
+            readTimeoutMs = timeoutMs
         )
     }
 
-    private fun post(payload: JSONObject, expectResponse: Boolean): JSONObject? {
+    private fun post(payload: JSONObject, expectResponse: Boolean, readTimeoutMs: Int = 0): JSONObject? {
         verifyTls()
         val connection = URL(endpoint).openConnection() as HttpURLConnection
         if (connection is javax.net.ssl.HttpsURLConnection) {
@@ -155,7 +183,7 @@ class McpClient(
         val conn = connection.apply {
             requestMethod = "POST"
             connectTimeout = 15_000
-            readTimeout = 45_000
+            readTimeout = if (readTimeoutMs > 0) readTimeoutMs else 45_000
             doInput = true
             doOutput = true
             setRequestProperty("Content-Type", "application/json")

@@ -281,7 +281,8 @@ private fun ToolStepCard(msg: Msg) {
                                 code = msg.toolExitCode,
                                 durationMs = msg.toolDurationMs,
                                 timedOut = msg.toolTimedOut,
-                                timeoutSeconds = msg.toolTimeoutSeconds
+                                timeoutSeconds = msg.toolTimeoutSeconds,
+                                cancelled = msg.toolCancelled
                             ),
                             failed
                         )

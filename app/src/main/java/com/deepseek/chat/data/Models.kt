@@ -61,6 +61,8 @@ data class Msg(
     /** 服务端超时（_meta.timeout） */
     val toolTimedOut: Boolean = false,
     val toolTimeoutSeconds: Int? = null,
+    /** 用户点停止、服务端取消（_meta.cancelled） */
+    val toolCancelled: Boolean = false,
     /** role=tool_step 时展示用的参数摘要 */
     val toolArgs: String? = null,
     /**

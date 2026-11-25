@@ -92,7 +92,13 @@ fun ChatScreen(
     var showOptions by remember { mutableStateOf(false) }
 
     val conversation = state.conversation
-    val messages = conversation?.messages.orEmpty()
+    // tool 消息只用于发给模型（tool_calls 配对），界面上由 TOOL_STEP 卡片展示；
+    // 纯工具调用、没有正文/思考的 assistant 也不显示
+    val messages = conversation?.messages.orEmpty().filter { msg ->
+        msg.role != Role.TOOL &&
+            !(msg.role == Role.ASSISTANT && msg.text.isBlank() && msg.reasoning.isBlank() &&
+                !msg.toolCallsJson.isNullOrBlank())
+    }
     val model = conversation?.model ?: state.settings.model
     val level = Reasoning.levelOf(
         conversation?.thinking ?: state.settings.thinking,
