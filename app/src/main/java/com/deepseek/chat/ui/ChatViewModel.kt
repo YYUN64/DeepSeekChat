@@ -662,28 +662,48 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         // 底栏状态只是补充，整个工具执行期间都留着，不再设置后立刻清空
                         _state.update { it.copy(toolStatus = "正在调用工具：$name") }
                         var failed = false
+                        var failureReason: Throwable? = null
                         val output = withContext(Dispatchers.IO) {
                             runCatching { activeMcp.callTool(name, arguments) }
-                                .onFailure { failed = true }
+                                .onFailure {
+                                    failed = true
+                                    failureReason = it
+                                }
                                 .getOrElse { "工具调用失败：${it.message}" }
                         }
+                        // 45 秒工具超时：卡片标成失败并把原因写进本轮结果，循环继续（不会整体挂住）
+                        val timedOut = failureReason is java.net.SocketTimeoutException ||
+                            (failureReason?.message ?: "").contains("timed out", ignoreCase = true) ||
+                            (failureReason?.message ?: "").contains("timeout", ignoreCase = true)
                         updateVisible(conversation.id, myRound, stepId) {
                             it.copy(
                                 text = if (failed) "" else summarize(output, 400),
-                                error = if (failed) "调用失败：${summarize(output, 200)}" else null
+                                error = when {
+                                    !failed -> null
+                                    timedOut -> "执行超时（45 秒）：$name"
+                                    else -> "调用失败：$name：${summarize(output, 180)}"
+                                }
                             )
+                        }
+                        val toolResult = if (timedOut) {
+                            "工具执行超时（45 秒），已终止：$name"
+                        } else {
+                            output
                         }
                         requestMessages += Msg(
                             id = UUID.randomUUID().toString(),
                             role = Role.TOOL,
                             toolCallId = call.optString("id"),
-                            text = output.take(MAX_TOOL_OUTPUT)
+                            text = toolResult.take(MAX_TOOL_OUTPUT)
                         )
                     }
                     _state.update { it.copy(toolStatus = null) }
                 }
             } catch (e: CancellationException) {
                 cancelled = true
+            } catch (e: java.net.SocketTimeoutException) {
+                // 看门狗：60 秒没有任何数据（DeepSeekClient readTimeout）
+                failure = "响应超时（60 秒没有收到数据），请重试"
             } catch (e: Exception) {
                 failure = e.message ?: "请求失败"
             } finally {
@@ -768,9 +788,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             withContext(NonCancellable + Dispatchers.IO) { chatStore.save(withAnswer) }
             refreshConversations()
         }
-        // 无论正常结束、失败还是被停止，都收起前台服务通知
+        // 无论正常结束、失败、超时还是被停止，都收起前台服务通知；
+        // 兜底保证界面不会停在“转圈”：streaming / toolStatus 一定复位
         job?.invokeOnCompletion {
             ChatService.stop(getApplication())
+            if (myRound == round) {
+                _state.update { it.copy(streaming = false, toolStatus = null) }
+            }
         }
     }
 
@@ -1035,6 +1059,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         const val MAX_TOOL_OUTPUT = 8000
 
         /** 流式文本推给 UI 的最小间隔 */
-        const val STREAM_PUSH_INTERVAL_MS = 80L
+        const val STREAM_PUSH_INTERVAL_MS = 120L
     }
 }

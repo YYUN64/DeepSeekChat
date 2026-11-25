@@ -130,7 +130,7 @@ class McpClient(
         val conn = connection.apply {
             requestMethod = "POST"
             connectTimeout = 15_000
-            readTimeout = 120_000
+            readTimeout = 45_000
             doInput = true
             doOutput = true
             setRequestProperty("Content-Type", "application/json")

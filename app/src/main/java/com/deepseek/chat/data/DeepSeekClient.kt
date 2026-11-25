@@ -68,7 +68,8 @@ class DeepSeekClient(private val images: ImageStore) {
         val conn = (URL(endpoint(settings.baseUrl)).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 30_000
-            readTimeout = 300_000
+            // 60 秒没有任何数据就当看门狗超时（流式期间每个 SSE 事件都会重置这个计时）
+    readTimeout = 60_000
             doInput = true
             doOutput = true
             useCaches = false

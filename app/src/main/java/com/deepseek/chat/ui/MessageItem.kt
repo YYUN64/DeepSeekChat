@@ -128,14 +128,9 @@ private fun AssistantMessage(
 
         if (msg.text.isNotBlank()) {
             if (streaming) {
-                // 流式阶段先按纯文本渲染，避免每来一个字就整篇重排 Markdown
-                SelectionContainer {
-                    Text(
-                        text = msg.text,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
+                // 流式期间也渲染 Markdown（表格/代码块/公式边生成边出现）：
+                // 重排频率由 ChatViewModel 的 publishStream 节流到 ~8Hz，不会每个 delta 都重排
+                MarkdownText(text = msg.text)
             } else {
                 MarkdownText(text = msg.text)
             }

@@ -38,6 +38,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
@@ -446,9 +447,11 @@ private fun buildInline(
                 pop()
             }
             groups[6].isNotEmpty() -> {
+                val start = length
                 pushStyle(SpanStyle(color = accent, textDecoration = TextDecoration.Underline))
                 append(groups[6])
                 pop()
+                if (groups[7].isNotBlank()) addLink(LinkAnnotation.Url(groups[7]), start, length)
             }
             groups[8].isNotEmpty() -> {
                 pushStyle(SpanStyle(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic))
@@ -456,9 +459,11 @@ private fun buildInline(
                 pop()
             }
             groups[9].isNotEmpty() -> {
+                val start = length
                 pushStyle(SpanStyle(color = accent, textDecoration = TextDecoration.Underline))
                 append(groups[9])
                 pop()
+                addLink(LinkAnnotation.Url(groups[9]), start, length)
             }
             // \( ... \)：渲染成行内公式图，失败回退纯文本
             groups[10].isNotEmpty() -> appendMath(groups[10])
