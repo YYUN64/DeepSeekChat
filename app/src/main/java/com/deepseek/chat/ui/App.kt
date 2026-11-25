@@ -76,6 +76,7 @@ fun DeepSeekApp(state: ChatUiState, vm: ChatViewModel) {
                 },
                 onDelete = { id -> vm.deleteConversation(id) },
                 onRename = { id, title -> vm.renameConversation(id, title) },
+                onCopy = { id -> vm.copyConversation(id) },
                 onOpenSettings = {
                     scope.launch { drawerState.close() }
                     vm.setShowSettings(true)

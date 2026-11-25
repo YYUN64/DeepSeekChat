@@ -17,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Visibility
@@ -44,14 +45,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.deepseek.chat.data.ContextLimits
+import com.deepseek.chat.data.McpSigner
 import com.deepseek.chat.data.Models
 import com.deepseek.chat.data.Reasoning
 import com.deepseek.chat.data.Settings
@@ -68,7 +73,6 @@ fun SettingsScreen(
     onBack: () -> Unit
 ) {
     var showKey by remember { mutableStateOf(false) }
-    var showToken by remember { mutableStateOf(false) }
     var showContextPicker by remember { mutableStateOf(false) }
     var showOutputPicker by remember { mutableStateOf(false) }
     val level = Reasoning.levelOf(settings.thinking, settings.effort)
@@ -324,35 +328,67 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(bottom = 10.dp)
                     )
-                    OutlinedTextField(
-                        value = settings.mcpToken,
-                        onValueChange = { onChange(settings.copy(mcpToken = it.trim())) },
-                        label = { Text("Token（可选）") },
-                        placeholder = { Text("与服务端 MCP_TOKEN 一致，留空表示不鉴权") },
-                        singleLine = true,
-                        visualTransformation = if (showToken) {
-                            VisualTransformation.None
-                        } else {
-                            PasswordVisualTransformation()
-                        },
-                        trailingIcon = {
-                            IconButton(onClick = { showToken = !showToken }) {
-                                Icon(
-                                    imageVector = if (showToken) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
-                                    contentDescription = if (showToken) "隐藏 token" else "显示 token"
-                                )
-                            }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp)
-                    )
+
+                    // 密钥鉴权：私钥在 Android Keystore（不可导出），服务端只存公钥
+                    var publicKey by remember { mutableStateOf(McpSigner.publicKeySpkiBase64()) }
+                    var keyId by remember { mutableStateOf(McpSigner.keyId()) }
+                    val clipboard = LocalClipboardManager.current
                     Text(
-                        text = "token 以明文经 HTTP 发送；公网使用请走 HTTPS 反向代理、WireGuard 或 Tailscale，不要直接裸奔 http://。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 4.dp)
+                        text = "密钥鉴权（推荐）",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(top = 16.dp)
                     )
+                    if (publicKey == null) {
+                        Text(
+                            text = "未生成。生成后把公钥复制到服务器的 authorized_keys（系统级默认 /etc/mcp/authorized_keys，用户级默认 ~/.config/pocket-mcp/authorized_keys）。私钥保存在 Android Keystore，不可导出；换机/重装需要重新生成并替换服务器上的旧公钥。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+                        TextButton(onClick = {
+                            if (McpSigner.generateKey()) {
+                                publicKey = McpSigner.publicKeySpkiBase64()
+                                keyId = McpSigner.keyId()
+                            }
+                        }) { Text("生成密钥") }
+                    } else {
+                        Text(
+                            text = "已启用 · key id ${keyId.orEmpty()}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                        SelectionContainer {
+                            Text(
+                                text = publicKey.orEmpty(),
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = FontFamily.Monospace
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            TextButton(onClick = {
+                                clipboard.setText(AnnotatedString(publicKey.orEmpty()))
+                            }) { Text("复制公钥") }
+                            TextButton(onClick = {
+                                if (McpSigner.generateKey()) {
+                                    publicKey = McpSigner.publicKeySpkiBase64()
+                                    keyId = McpSigner.keyId()
+                                }
+                            }) { Text("重新生成") }
+                            TextButton(onClick = {
+                                McpSigner.deleteKey()
+                                publicKey = null
+                                keyId = null
+                            }) { Text("删除") }
+                        }
+                    }
                     Text(
                         text = "工具调用轮数",
                         style = MaterialTheme.typography.bodyMedium,

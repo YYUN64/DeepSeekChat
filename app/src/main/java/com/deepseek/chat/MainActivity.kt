@@ -1,11 +1,16 @@
 package com.deepseek.chat
 
+import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.DisposableEffect
@@ -26,8 +31,12 @@ import com.deepseek.chat.ui.theme.DeepSeekTheme
 
 class MainActivity : ComponentActivity() {
 
+    private val notificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        requestNotificationPermissionIfNeeded()
         setContent {
             val vm: ChatViewModel = viewModel()
             val state by vm.state.collectAsStateWithLifecycle()
@@ -67,6 +76,16 @@ class MainActivity : ComponentActivity() {
                 DeepSeekApp(state = state, vm = vm)
             }
         }
+    }
+    /** Android 13+ 才需要运行时通知权限；Android 10 及以下直接跳过 */
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 }
 

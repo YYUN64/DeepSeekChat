@@ -21,11 +21,19 @@ data class McpTool(
  * 参考 MCP 2025-06-18 规范：POST JSON-RPC，响应可能是 application/json
  * 或 text/event-stream；服务端可能用 `Mcp-Session-Id` 头维持会话。
  */
-class McpClient(private val endpoint: String, private val token: String = "") {
+class McpClient(
+    private val endpoint: String,
+    /** 有 Keystore 密钥时用签名鉴权；没有密钥则请求不带鉴权（服务端未配置鉴权时才可用） */
+    private val context: android.content.Context? = null
+) {
 
-    constructor(host: String, port: Int, token: String = "") : this(
+    constructor(
+        host: String,
+        port: Int,
+        context: android.content.Context? = null
+    ) : this(
         "http://${host.trim().trimEnd('/').removePrefix("http://").removePrefix("https://")}:$port/mcp",
-        token
+        context
     )
 
     private var sessionId: String? = null
@@ -112,18 +120,27 @@ class McpClient(private val endpoint: String, private val token: String = "") {
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("Accept", "application/json, text/event-stream")
-            authorizationHeader(token)?.let { setRequestProperty("Authorization", it) }
             sessionId?.let { setRequestProperty("Mcp-Session-Id", it) }
         }
         try {
             val body = payload.toString().toByteArray(Charsets.UTF_8)
+            signRequest(conn, body)
             conn.setFixedLengthStreamingMode(body.size)
             conn.outputStream.use { stream -> stream.write(body) }
             conn.getHeaderField("Mcp-Session-Id")?.takeIf { it.isNotBlank() }?.let { sessionId = it }
 
             val code = conn.responseCode
             if (code == 401) {
-                throw ApiException("MCP 服务器要求 token，请检查设置里的 MCP Token", 401)
+                val detail = runCatching {
+                    conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                }.getOrNull()
+                val reason = runCatching {
+                    JSONObject(detail.orEmpty()).optJSONObject("error")?.optString("message")
+                }.getOrNull()?.takeIf { it.isNotBlank() }
+                throw ApiException(
+                    reason ?: "MCP 鉴权失败：服务器不接受当前请求签名，请检查「密钥鉴权」里的公钥是否已加到服务器",
+                    401
+                )
             }
             if (code !in 200..299) {
                 val detail = runCatching {
@@ -147,6 +164,21 @@ class McpClient(private val endpoint: String, private val token: String = "") {
         } finally {
             runCatching { conn.disconnect() }
         }
+    }
+
+    /** 有 Keystore 密钥时为请求加签名头；没有密钥则不带鉴权（服务端未配置鉴权时才可用） */
+    private fun signRequest(conn: HttpURLConnection, body: ByteArray) {
+        if (context == null || !McpSigner.hasKey()) return
+        val keyId = McpSigner.keyId() ?: return
+        val timestamp = (System.currentTimeMillis() / 1000).toString()
+        val nonce = McpSigner.randomNonce()
+        val digest = McpSigner.sha256Hex(body)
+        val message = "POST\n/mcp\n$digest\n$timestamp\n$nonce".toByteArray(Charsets.UTF_8)
+        val signature = McpSigner.sign(message) ?: return
+        conn.setRequestProperty("X-MCP-Key-Id", keyId)
+        conn.setRequestProperty("X-MCP-Timestamp", timestamp)
+        conn.setRequestProperty("X-MCP-Nonce", nonce)
+        conn.setRequestProperty("X-MCP-Signature", signature)
     }
 
     private fun readJson(conn: HttpURLConnection, expectId: Int): JSONObject? {
@@ -182,10 +214,6 @@ class McpClient(private val endpoint: String, private val token: String = "") {
     }
 
     companion object {
-        /** token → Authorization 头；空 token 表示不鉴权 */
-        fun authorizationHeader(token: String): String? =
-            token.trim().ifBlank { null }?.let { "Bearer $it" }
-
         /** MCP 工具 → OpenAI function tools 数组 */
         fun toOpenAiTools(tools: List<McpTool>): JSONArray {
             val array = JSONArray()

@@ -29,9 +29,8 @@ class SettingsTest {
     }
 
     @Test
-    fun `mcp token and rounds defaults`() {
+    fun `mcp rounds defaults`() {
         val settings = Settings()
-        assertEquals("", settings.mcpToken)
         assertEquals(4, settings.mcpMaxRounds)
         assertEquals(4, settings.effectiveMcpRounds())
     }
@@ -42,12 +41,5 @@ class SettingsTest {
         assertEquals(64, Settings(mcpMaxRounds = 64).effectiveMcpRounds())
         assertEquals(1, Settings(mcpMaxRounds = 0).effectiveMcpRounds())
         assertEquals(64, Settings(mcpMaxRounds = 999).effectiveMcpRounds())
-    }
-
-    @Test
-    fun `mcp token maps to bearer header only when non blank`() {
-        assertNull(McpClient.authorizationHeader(""))
-        assertNull(McpClient.authorizationHeader("   "))
-        assertEquals("Bearer secret", McpClient.authorizationHeader(" secret "))
     }
 }

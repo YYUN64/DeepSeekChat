@@ -1,5 +1,13 @@
 个人自用的 DeepSeek 安卓客户端，直连官方 API。
 
+## 修复（v1.5.0）
+
+- **MCP 密钥鉴权**：设置 → MCP 服务器 → 「密钥鉴权」可生成 RSA-2048 密钥（私钥保存在 Android Keystore，**不可导出**），公钥一键复制，粘贴到服务器 `authorized_keys`（系统级 `/etc/mcp/authorized_keys`，用户级 `~/.config/pocket-mcp/authorized_keys`）即可；请求自动带 `X-MCP-Key-Id/Timestamp/Nonce/Signature`（RSA-SHA256），服务端只存公钥、纯标准库验签，时间戳 ±300s + nonce 防重放。换机/重装需重新生成并替换服务器公钥
+- **App 不再保存/发送 token**：设置里的 Token 输入框和 `Authorization: Bearer` 逻辑删除，只用密钥签名（服务端仍保留 Bearer token 作为 legacy 兼容）
+- **复制对话**：历史抽屉每个会话的「⋮」菜单新增「复制内容」，整段会话转成 Markdown（`**用户**：…` / `**助手**：…`，工具步骤 `> 调用工具 name(args)`，图片 `[图片]`），复制后 Toast「已复制 N 条消息」
+- **生成期间前台服务**：开始流式回答时启动最低可见通知（IMPORTANCE_MIN、静默、无按钮，只显示「DeepSeek Lite / 正在生成…」），切后台/锁屏/长时间不操作不会被系统回收；结束/失败/取消立即收起。Android 不允许完全没有通知的长期后台任务，这是最低可见形态。Android 13+ 才需要通知权限（Android 10 无此要求）
+- 版本 1.5.0 (19)
+
 ## 修复（v1.4.2）
 
 - **生成中按返回键不再中断**：对话页按返回键改为把任务移到后台（`moveTaskToBack`），Activity/ViewModel 和流式协程都还活着，回答继续生成；从最近任务切回来能看到完整结果。后台被系统回收时仍会按检查点保留「已停止」的部分内容

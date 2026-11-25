@@ -35,8 +35,8 @@ android {
         applicationId = "io.github.yyun64.deepseekchat"
         minSdk = 26
         targetSdk = 34
-        versionCode = 18
-        versionName = "1.4.2"
+        versionCode = 19
+        versionName = "1.5.0"
         vectorDrawables { useSupportLibrary = true }
     }
 

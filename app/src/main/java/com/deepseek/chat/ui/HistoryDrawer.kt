@@ -63,6 +63,7 @@ fun HistoryDrawer(
     onNew: () -> Unit,
     onDelete: (String) -> Unit,
     onRename: (String, String) -> Unit,
+    onCopy: (String) -> Unit,
     onOpenSettings: () -> Unit,
     onClearAll: () -> Unit
 ) {
@@ -137,6 +138,7 @@ fun HistoryDrawer(
                         meta = meta,
                         selected = meta.id == currentId,
                         onClick = { onSelect(meta.id) },
+                        onCopy = { onCopy(meta.id) },
                         onRename = {
                             renameTarget = meta
                             renameText = meta.title
@@ -252,6 +254,7 @@ private fun HistoryRow(
     meta: ConversationMeta,
     selected: Boolean,
     onClick: () -> Unit,
+    onCopy: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -295,6 +298,13 @@ private fun HistoryRow(
                 )
             }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text("复制内容") },
+                    onClick = {
+                        menuOpen = false
+                        onCopy()
+                    }
+                )
                 DropdownMenuItem(
                     text = { Text("重命名") },
                     onClick = {

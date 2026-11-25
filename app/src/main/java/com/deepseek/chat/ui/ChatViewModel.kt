@@ -3,9 +3,12 @@ package com.deepseek.chat.ui
 import android.app.Application
 import android.graphics.Bitmap
 import android.net.Uri
+import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.deepseek.chat.ChatService
 import com.deepseek.chat.data.ApiException
+import com.deepseek.chat.data.ConversationMarkdown
 import com.deepseek.chat.data.BuiltinPrompts
 import com.deepseek.chat.data.ChatStore
 import com.deepseek.chat.data.Conversation
@@ -279,6 +282,29 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         refreshConversations()
     }
 
+    /** 把整段会话复制成 Markdown（历史抽屉的「复制内容」） */
+    fun copyConversation(id: String) {
+        viewModelScope.launch {
+            val conversation = withContext(Dispatchers.IO) { chatStore.load(id) }
+            if (conversation == null) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(getApplication(), "会话不存在", Toast.LENGTH_SHORT).show()
+                }
+                return@launch
+            }
+            val markdown = ConversationMarkdown.render(conversation.messages)
+            val count = conversation.messages.size
+            withContext(Dispatchers.Main) {
+                val clipboard = getApplication<android.app.Application>()
+                    .getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                clipboard.setPrimaryClip(
+                    android.content.ClipData.newPlainText("deepseek-conversation", markdown)
+                )
+                Toast.makeText(getApplication(), "已复制 $count 条消息", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     fun deleteAllConversations() {
         stopStreaming()
         chatStore.deleteAll()
@@ -422,6 +448,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         checkpointId = UUID.randomUUID().toString()
         lastStreamPush = 0L
 
+        // 前台服务：生成期间保持进程优先级（切后台/锁屏/长时间不操作都不至于被系统回收）
+        ChatService.start(getApplication())
+
         job = viewModelScope.launch {
             var failure: String? = null
             var usage: Usage? = null
@@ -435,7 +464,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             if (settings.mcpEnabled && settings.mcpHost.isNotBlank()) {
                 try {
                     val prepared = withContext(Dispatchers.IO) {
-                        val client = McpClient(settings.mcpHost, settings.mcpPort, settings.mcpToken)
+                        val client = McpClient(settings.mcpHost, settings.mcpPort, getApplication())
                         client.initialize()
                         client to client.listTools()
                     }
@@ -676,6 +705,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             withContext(NonCancellable + Dispatchers.IO) { chatStore.save(withAnswer) }
             refreshConversations()
         }
+        // 无论正常结束、失败还是被停止，都收起前台服务通知
+        job?.invokeOnCompletion {
+            ChatService.stop(getApplication())
+        }
     }
 
     /**
@@ -786,7 +819,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(notice = "正在连接 MCP…") }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val client = McpClient(settings.mcpHost, settings.mcpPort, settings.mcpToken)
+                    val client = McpClient(settings.mcpHost, settings.mcpPort, getApplication())
                     client.initialize()
                     client.listTools()
                 }
