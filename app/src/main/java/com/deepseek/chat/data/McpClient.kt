@@ -22,20 +22,30 @@ data class McpTool(
  * 或 text/event-stream；服务端可能用 `Mcp-Session-Id` 头维持会话。
  */
 class McpClient(
-    private val endpoint: String,
+    private val host: String,
+    private val port: Int,
+    private val https: Boolean = false,
+    /** 已信任的证书指纹（TOFU）；空表示还没信任过 */
+    private val pinnedFingerprint: String = "",
     /** 有 Keystore 密钥时用签名鉴权；没有密钥则请求不带鉴权（服务端未配置鉴权时才可用） */
     private val context: android.content.Context? = null
 ) {
 
-    constructor(
-        host: String,
-        port: Int,
-        https: Boolean = false,
-        context: android.content.Context? = null
-    ) : this(McpEndpoint.url(host, port, https), context)
-
+    private val endpoint: String = McpEndpoint.url(host, port, https)
     private var sessionId: String? = null
     private var nextId = 1
+    private var tlsVerified = false
+
+    /** HTTPS 时先做一次 TLS 探测：没 pin 抛 UntrustedCertException，pin 不一致抛 CertMismatchException */
+    private fun verifyTls() {
+        if (!https || tlsVerified) return
+        val actual = McpTls.probeFingerprint(McpEndpoint.hostOnly(host), port)
+        if (pinnedFingerprint.isBlank()) throw UntrustedCertException(actual)
+        if (!McpTls.matches(pinnedFingerprint, actual)) {
+            throw CertMismatchException(actual, pinnedFingerprint)
+        }
+        tlsVerified = true
+    }
 
     fun initialize() {
         call(
@@ -110,7 +120,14 @@ class McpClient(
     }
 
     private fun post(payload: JSONObject, expectResponse: Boolean): JSONObject? {
-        val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+        verifyTls()
+        val connection = URL(endpoint).openConnection() as HttpURLConnection
+        if (connection is javax.net.ssl.HttpsURLConnection) {
+            // 证书已经通过指纹 pin 校验（自签也信任），这里只做传输
+            connection.sslSocketFactory = McpTls.pinnedContext().socketFactory
+            connection.hostnameVerifier = javax.net.ssl.HostnameVerifier { _, _ -> true }
+        }
+        val conn = connection.apply {
             requestMethod = "POST"
             connectTimeout = 15_000
             readTimeout = 120_000

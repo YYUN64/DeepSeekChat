@@ -52,8 +52,12 @@ fun DeepSeekApp(state: ChatUiState, vm: ChatViewModel) {
         SettingsScreen(
             settings = state.settings,
             notice = state.notice,
+            pendingCertFingerprint = state.pendingCertFingerprint,
             onChange = vm::updateSettings,
             onTestMcp = { vm.testMcp() },
+            onTrustCert = { vm.trustPendingCert() },
+            onResetCertTrust = { vm.resetCertTrust() },
+            onDismissPendingCert = { vm.dismissPendingCert() },
             onClearNotice = { vm.clearNotice() },
             onBack = { vm.setShowSettings(false) }
         )

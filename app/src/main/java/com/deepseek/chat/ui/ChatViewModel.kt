@@ -8,7 +8,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.deepseek.chat.ChatService
 import com.deepseek.chat.data.ApiException
+import com.deepseek.chat.data.CertMismatchException
 import com.deepseek.chat.data.ConversationMarkdown
+import com.deepseek.chat.data.UntrustedCertException
 import com.deepseek.chat.data.BuiltinPrompts
 import com.deepseek.chat.data.ChatStore
 import com.deepseek.chat.data.Conversation
@@ -53,7 +55,9 @@ data class ChatUiState(
     val showSettings: Boolean = false,
     val lastUsage: Usage? = null,
     /** 正在执行的工具名（MCP），null 表示没有 */
-    val toolStatus: String? = null
+    val toolStatus: String? = null,
+    /** 首次连接时待用户确认的证书指纹（TOFU）；null 表示没有待确认 */
+    val pendingCertFingerprint: String? = null
 ) {
     val messages: List<Msg> get() = conversation?.messages.orEmpty()
 }
@@ -464,7 +468,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             if (settings.mcpEnabled && settings.mcpHost.isNotBlank()) {
                 try {
                     val prepared = withContext(Dispatchers.IO) {
-                        val client = McpClient(settings.mcpHost, settings.mcpPort, settings.mcpHttps, getApplication())
+                        val client = McpClient(
+                            settings.mcpHost,
+                            settings.mcpPort,
+                            settings.mcpHttps,
+                            settings.mcpCertFingerprint,
+                            getApplication()
+                        )
                         client.initialize()
                         client to client.listTools()
                     }
@@ -478,6 +488,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 } catch (e: CancellationException) {
                     throw e
+                } catch (e: UntrustedCertException) {
+                    mcp = null
+                    _state.update {
+                        it.copy(
+                            pendingCertFingerprint = e.fingerprint,
+                            notice = "首次连接：请在设置里确认服务器证书指纹"
+                        )
+                    }
+                } catch (e: CertMismatchException) {
+                    mcp = null
+                    _state.update {
+                        it.copy(
+                            notice = "MCP 证书指纹不匹配（可能是中间人，或服务端换了证书）。" +
+                                "确认是服务端更换后，可在设置里「重置信任」重新确认"
+                        )
+                    }
                 } catch (e: Exception) {
                     mcp = null
                     _state.update { it.copy(notice = "MCP 连接失败，本轮用普通对话：${e.message}") }
@@ -816,26 +842,72 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         viewModelScope.launch {
-            _state.update { it.copy(notice = "正在连接 MCP…") }
+            _state.update { it.copy(notice = "正在连接 MCP…", pendingCertFingerprint = null) }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val client = McpClient(settings.mcpHost, settings.mcpPort, settings.mcpHttps, getApplication())
+                    val client = McpClient(
+                        settings.mcpHost,
+                        settings.mcpPort,
+                        settings.mcpHttps,
+                        settings.mcpCertFingerprint,
+                        getApplication()
+                    )
                     client.initialize()
                     client.listTools()
                 }
             }
-            _state.update {
-                it.copy(
-                    notice = result.fold(
-                        onSuccess = { tools ->
-                            if (tools.isEmpty()) "连上了，但服务器没有提供工具"
-                            else "MCP 连接成功，工具：" + tools.joinToString("、") { tool -> tool.name }
-                        },
-                        onFailure = { e -> "MCP 连接失败：${e.message}" }
+            val failure = result.exceptionOrNull()
+            when {
+                failure is UntrustedCertException -> {
+                    _state.update {
+                        it.copy(
+                            notice = null,
+                            pendingCertFingerprint = failure.fingerprint
+                        )
+                    }
+                }
+                failure is CertMismatchException -> {
+                    _state.update {
+                        it.copy(
+                            notice = "证书指纹不匹配（可能是中间人，或服务端换了证书）。" +
+                                "确认是服务端更换后，可在「MCP 密钥」里重置信任"
+                        )
+                    }
+                }
+                else -> _state.update {
+                    it.copy(
+                        notice = result.fold(
+                            onSuccess = { tools ->
+                                if (tools.isEmpty()) "连上了，但服务器没有提供工具"
+                                else "MCP 连接成功，工具：" + tools.joinToString("、") { tool -> tool.name }
+                            },
+                            onFailure = { e -> "MCP 连接失败：${e.message}" }
+                        )
                     )
-                )
+                }
             }
         }
+    }
+
+    /** 用户确认首次连接的证书指纹：存下 pin 并立刻重试一次 */
+    fun trustPendingCert() {
+        val fingerprint = _state.value.pendingCertFingerprint ?: return
+        val updated = _state.value.settings.copy(mcpCertFingerprint = fingerprint)
+        settingsStore.save(updated)
+        _state.update { it.copy(settings = updated, pendingCertFingerprint = null) }
+        testMcp()
+    }
+
+    /** 清除已信任的证书指纹（下次连接重新走首次确认） */
+    fun resetCertTrust() {
+        val updated = _state.value.settings.copy(mcpCertFingerprint = "")
+        settingsStore.save(updated)
+        _state.update { it.copy(settings = updated, pendingCertFingerprint = null) }
+    }
+
+    /** 取消首次连接确认 */
+    fun dismissPendingCert() {
+        _state.update { it.copy(pendingCertFingerprint = null) }
     }
 
     fun updateSettings(settings: Settings) {

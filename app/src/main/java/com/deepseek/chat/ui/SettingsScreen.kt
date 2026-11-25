@@ -69,8 +69,12 @@ import com.deepseek.chat.data.ThemeMode
 fun SettingsScreen(
     settings: Settings,
     notice: String?,
+    pendingCertFingerprint: String?,
     onChange: (Settings) -> Unit,
     onTestMcp: () -> Unit,
+    onTrustCert: () -> Unit,
+    onResetCertTrust: () -> Unit,
+    onDismissPendingCert: () -> Unit,
     onClearNotice: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -80,6 +84,7 @@ fun SettingsScreen(
     var showKeyPage by remember { mutableStateOf(false) }
     var showRegenerateConfirm by remember { mutableStateOf(false) }
     var oneTimePublicKey by remember { mutableStateOf<String?>(null) }
+    var showResetCertConfirm by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
     fun generateKeyNow() {
         if (McpSigner.generateKey()) {
@@ -351,6 +356,30 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(bottom = 10.dp)
                     )
+
+                    // TOFU：已信任的服务器证书指纹
+                    Text(
+                        text = "证书指纹",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = if (settings.mcpCertFingerprint.isBlank()) {
+                            "未信任 · 首次连接时会弹窗让你确认"
+                        } else {
+                            "已信任：" + settings.mcpCertFingerprint
+                        },
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                    if (settings.mcpCertFingerprint.isNotBlank()) {
+                        TextButton(onClick = { showResetCertConfirm = true }) {
+                            Text("重置信任", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
 
                     // 密钥鉴权：私钥在 Android Keystore（不可导出），公钥只在生成时一次性展示
                     Text(
@@ -630,6 +659,62 @@ fun SettingsScreen(
             },
             confirmButton = {
                 TextButton(onClick = { oneTimePublicKey = null }) { Text("我已复制，关闭") }
+            }
+        )
+    }
+
+    // TOFU：首次连接确认服务器证书指纹
+    val pendingCert = pendingCertFingerprint
+    if (pendingCert != null) {
+        AlertDialog(
+            onDismissRequest = { onDismissPendingCert() },
+            title = { Text("首次连接，确认服务器证书？") },
+            text = {
+                Column {
+                    Text(
+                        text = "服务器证书指纹（SHA-256）：",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = pendingCert,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(vertical = 6.dp)
+                    )
+                    Text(
+                        text = "和服务器启动日志或 openssl 输出核对一致后再信任；以后指纹变了会拒绝连接。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = onTrustCert) { Text("信任并重试") }
+            },
+            dismissButton = {
+                TextButton(onClick = { onDismissPendingCert() }) { Text("取消") }
+            }
+        )
+    }
+
+    if (showResetCertConfirm) {
+        AlertDialog(
+            onDismissRequest = { showResetCertConfirm = false },
+            title = { Text("重置信任？") },
+            text = { Text("重置后下次连接会重新弹出首次确认；确认之前 MCP 工具不可用。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showResetCertConfirm = false
+                    onResetCertTrust()
+                }) {
+                    Text("确认重置", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetCertConfirm = false }) { Text("取消") }
             }
         )
     }
