@@ -30,11 +30,9 @@ class McpClient(
     constructor(
         host: String,
         port: Int,
+        https: Boolean = false,
         context: android.content.Context? = null
-    ) : this(
-        "http://${host.trim().trimEnd('/').removePrefix("http://").removePrefix("https://")}:$port/mcp",
-        context
-    )
+    ) : this(McpEndpoint.url(host, port, https), context)
 
     private var sessionId: String? = null
     private var nextId = 1

@@ -18,6 +18,8 @@ data class Settings(
     val mcpEnabled: Boolean = false,
     val mcpHost: String = "",
     val mcpPort: Int = DEFAULT_MCP_PORT,
+    /** 使用 HTTPS 连接 MCP（需要服务器配好 TLS；默认 http） */
+    val mcpHttps: Boolean = false,
     /** 单次提问最多几轮工具调用；64 表示「不限」（内部上限 64，避免死循环） */
     val mcpMaxRounds: Int = DEFAULT_MCP_ROUNDS
 ) {
@@ -58,6 +60,7 @@ class SettingsStore(context: Context) {
         mcpEnabled = prefs.getBoolean(KEY_MCP_ENABLED, false),
         mcpHost = prefs.getString(KEY_MCP_HOST, "").orEmpty(),
         mcpPort = prefs.getInt(KEY_MCP_PORT, Settings.DEFAULT_MCP_PORT),
+        mcpHttps = prefs.getBoolean(KEY_MCP_HTTPS, false),
         mcpMaxRounds = prefs.getInt(KEY_MCP_ROUNDS, Settings.DEFAULT_MCP_ROUNDS)
     )
 
@@ -76,6 +79,7 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_MCP_ENABLED, settings.mcpEnabled)
             .putString(KEY_MCP_HOST, settings.mcpHost)
             .putInt(KEY_MCP_PORT, settings.mcpPort)
+            .putBoolean(KEY_MCP_HTTPS, settings.mcpHttps)
             .putInt(KEY_MCP_ROUNDS, settings.mcpMaxRounds)
             .apply()
     }
@@ -94,6 +98,7 @@ class SettingsStore(context: Context) {
         const val KEY_MCP_ENABLED = "mcp_enabled"
         const val KEY_MCP_HOST = "mcp_host"
         const val KEY_MCP_PORT = "mcp_port"
+        const val KEY_MCP_HTTPS = "mcp_https"
         const val KEY_MCP_ROUNDS = "mcp_max_rounds"
     }
 }

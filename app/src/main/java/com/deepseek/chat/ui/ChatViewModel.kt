@@ -464,7 +464,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             if (settings.mcpEnabled && settings.mcpHost.isNotBlank()) {
                 try {
                     val prepared = withContext(Dispatchers.IO) {
-                        val client = McpClient(settings.mcpHost, settings.mcpPort, getApplication())
+                        val client = McpClient(settings.mcpHost, settings.mcpPort, settings.mcpHttps, getApplication())
                         client.initialize()
                         client to client.listTools()
                     }
@@ -819,7 +819,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(notice = "正在连接 MCP…") }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val client = McpClient(settings.mcpHost, settings.mcpPort, getApplication())
+                    val client = McpClient(settings.mcpHost, settings.mcpPort, settings.mcpHttps, getApplication())
                     client.initialize()
                     client.listTools()
                 }

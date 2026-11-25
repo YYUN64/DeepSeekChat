@@ -326,6 +326,15 @@ fun SettingsScreen(
                                 }
                         )
                     }
+                    SwitchRow(
+                        label = "使用 HTTPS",
+                        description = "服务器配好证书后开启（需要域名 + 有效 CA 证书；裸 IP 签不了 Let's Encrypt）",
+                        checked = settings.mcpHttps,
+                        onCheckedChange = { enabled ->
+                            // 切换协议后旧的会话/工具状态不再适用，清掉本轮的工具缓存
+                            onChange(settings.copy(mcpHttps = enabled))
+                        }
+                    )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End
@@ -337,7 +346,7 @@ fun SettingsScreen(
                         }) { Text("测试连接") }
                     }
                     Text(
-                        text = "地址形如 http://<IPv4>:<端口>/mcp。开启后本轮的「联网」服务端工具会自动让位（DeepSeek 不允许两者同时声明）。",
+                        text = "地址形如 http(s)://<IPv4>:<端口>/mcp。开启后本轮的「联网」服务端工具会自动让位（DeepSeek 不允许两者同时声明）。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(bottom = 10.dp)
@@ -369,7 +378,7 @@ fun SettingsScreen(
                                 }
                             )
                             Text(
-                                text = "私钥在 Android Keystore（不可导出）；公钥只在生成时显示一次",
+                                text = "公钥只在生成时显示一次，关闭后无法查看",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -534,8 +543,8 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "私钥保存在 Android Keystore，不可导出；服务端只存公钥。" +
-                            "公钥加到 ~/.config/pocket-mcp/authorized_keys（用户级）或 " +
+                        text = "公钥只显示一次，关闭后无法再次查看；需要时重新生成。" +
+                            "把公钥加到 ~/.config/pocket-mcp/authorized_keys（用户级）或 " +
                             "/etc/mcp/authorized_keys（系统级，sudo）。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
