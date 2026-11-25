@@ -35,8 +35,8 @@ android {
         applicationId = "io.github.yyun64.deepseekchat"
         minSdk = 26
         targetSdk = 34
-        versionCode = 15
-        versionName = "1.3.0"
+        versionCode = 16
+        versionName = "1.4.0"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -101,6 +101,9 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("androidx.exifinterface:exifinterface:1.3.7")
+
+    // LaTeX 公式渲染（JLaTeXMath 的 Android 移植，Apache/GPL-2.0，约 700KB）
+    implementation("ru.noties:jlatexmath-android:0.2.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

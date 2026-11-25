@@ -28,11 +28,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,8 +61,10 @@ import com.deepseek.chat.data.ThemeMode
 @Composable
 fun SettingsScreen(
     settings: Settings,
+    notice: String?,
     onChange: (Settings) -> Unit,
     onTestMcp: () -> Unit,
+    onClearNotice: () -> Unit,
     onBack: () -> Unit
 ) {
     var showKey by remember { mutableStateOf(false) }
@@ -68,6 +73,14 @@ fun SettingsScreen(
     val level = Reasoning.levelOf(settings.thinking, settings.effort)
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
+    // 设置页自己的 Snackbar 宿主：MCP 测试结果当场显示，不再等回到对话页才弹
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(notice) {
+        if (notice != null) {
+            snackbarHostState.showSnackbar(notice)
+            onClearNotice()
+        }
+    }
     // 端口输入框和 settings.mcpPort 解耦：本地文本允许暂时为空/非法，
     // 只有解析成 1..65535 才写回 settings（否则退格永远删不掉最后一位数字）。
     // portFallback 记录“这次编辑开始前的合法端口”，清空后回退到它，
@@ -97,6 +110,7 @@ fun SettingsScreen(
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("设置") },
@@ -309,6 +323,45 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(bottom = 10.dp)
                     )
+                    OutlinedTextField(
+                        value = settings.mcpToken,
+                        onValueChange = { onChange(settings.copy(mcpToken = it.trim())) },
+                        label = { Text("Token（可选）") },
+                        placeholder = { Text("与服务端 MCP_TOKEN 一致，留空表示不鉴权") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                    )
+                    Text(
+                        text = "工具调用轮数",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        for (rounds in listOf(2, 4, 8, Settings.MAX_MCP_ROUNDS)) {
+                            SelectableChip(
+                                label = if (rounds == Settings.MAX_MCP_ROUNDS) "不限" else rounds.toString(),
+                                selected = settings.mcpMaxRounds == rounds,
+                                onClick = { onChange(settings.copy(mcpMaxRounds = rounds)) }
+                            )
+                        }
+                    }
+                    if (settings.mcpMaxRounds == Settings.MAX_MCP_ROUNDS) {
+                        Text(
+                            text = "「不限」内部上限 ${Settings.MAX_MCP_ROUNDS} 轮，避免死循环烧钱",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        )
+                    }
                 }
             }
 

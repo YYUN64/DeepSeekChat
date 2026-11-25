@@ -21,10 +21,11 @@ data class McpTool(
  * 参考 MCP 2025-06-18 规范：POST JSON-RPC，响应可能是 application/json
  * 或 text/event-stream；服务端可能用 `Mcp-Session-Id` 头维持会话。
  */
-class McpClient(private val endpoint: String) {
+class McpClient(private val endpoint: String, private val token: String = "") {
 
-    constructor(host: String, port: Int) : this(
-        "http://${host.trim().trimEnd('/').removePrefix("http://").removePrefix("https://")}:$port/mcp"
+    constructor(host: String, port: Int, token: String = "") : this(
+        "http://${host.trim().trimEnd('/').removePrefix("http://").removePrefix("https://")}:$port/mcp",
+        token
     )
 
     private var sessionId: String? = null
@@ -111,6 +112,7 @@ class McpClient(private val endpoint: String) {
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("Accept", "application/json, text/event-stream")
+            authorizationHeader(token)?.let { setRequestProperty("Authorization", it) }
             sessionId?.let { setRequestProperty("Mcp-Session-Id", it) }
         }
         try {
@@ -120,6 +122,9 @@ class McpClient(private val endpoint: String) {
             conn.getHeaderField("Mcp-Session-Id")?.takeIf { it.isNotBlank() }?.let { sessionId = it }
 
             val code = conn.responseCode
+            if (code == 401) {
+                throw ApiException("MCP 服务器要求 token，请检查设置里的 MCP Token", 401)
+            }
             if (code !in 200..299) {
                 val detail = runCatching {
                     conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
@@ -177,6 +182,10 @@ class McpClient(private val endpoint: String) {
     }
 
     companion object {
+        /** token → Authorization 头；空 token 表示不鉴权 */
+        fun authorizationHeader(token: String): String? =
+            token.trim().ifBlank { null }?.let { "Bearer $it" }
+
         /** MCP 工具 → OpenAI function tools 数组 */
         fun toOpenAiTools(tools: List<McpTool>): JSONArray {
             val array = JSONArray()

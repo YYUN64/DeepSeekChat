@@ -1,17 +1,23 @@
 package com.deepseek.chat.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material3.HorizontalDivider
@@ -26,17 +32,25 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.takeOrElse
 
 sealed interface MdBlock {
     data class Paragraph(val raw: String) : MdBlock
@@ -45,6 +59,8 @@ sealed interface MdBlock {
     data class ListItem(val marker: String, val raw: String, val level: Int = 0) : MdBlock
     data class Quote(val raw: String) : MdBlock
     data class Table(val header: List<String>, val rows: List<List<String>>) : MdBlock
+    /** 块级 LaTeX，渲染成居中的公式图；失败时回退到代码块 */
+    data class Math(val latex: String) : MdBlock
     object Rule : MdBlock
 }
 
@@ -125,10 +141,10 @@ fun parseMarkdown(source: String): List<MdBlock> {
 
             trimmed.isEmpty() -> flushParagraph()
 
-            // 兜底：模型还是输出了 LaTeX 块（$$...$$、\[...\]、\begin{...}）
+            // 块级 LaTeX：渲染成居中的公式图，失败时渲染器里回退成代码块
             mathBlock != null -> {
                 flushParagraph()
-                blocks.add(MdBlock.Code("math", mathBlock.code))
+                blocks.add(MdBlock.Math(mathBlock.latex))
                 index = mathBlock.endIndex
             }
 
@@ -215,16 +231,32 @@ private fun listLevel(line: String): Int {
 
 // ------------------------------------------------------------------ LaTeX 兜底
 
-private class MathBlock(val code: String, val endIndex: Int)
+private class MathBlock(val latex: String, val endIndex: Int)
 
 private val BEGIN_ENV = Regex("""\\begin\{([^}]*)\}""")
 
 /**
  * 识别块级 LaTeX：$$...$$、\[...\]、\begin{env}...\end{env}。
- * 返回转换后的等宽代码内容与结束行号；不是公式块时返回 null。
+ * 返回公式源码（不含定界符）与结束行号；不是公式块时返回 null。
  */
 private fun parseMathBlock(lines: List<String>, start: Int): MathBlock? {
     val first = lines[start].trim()
+    // \begin{env} ... \end{env}：整段保留（JLaTeXMath 需要环境名才能排版矩阵）
+    if (first.startsWith("\\begin{")) {
+        val env = BEGIN_ENV.find(first)?.groupValues?.get(1).orEmpty()
+        if (env.isEmpty()) return null
+        val close = "\\end{$env}"
+        val sb = StringBuilder()
+        var i = start
+        while (i < lines.size) {
+            if (sb.isNotEmpty()) sb.append('\n')
+            sb.append(lines[i].trimEnd())
+            if (lines[i].contains(close)) return MathBlock(sb.toString().trim(), i)
+            i++
+        }
+        return MathBlock(sb.toString().trim(), lines.size - 1)
+    }
+
     val open: String
     val close: String
     when {
@@ -236,20 +268,14 @@ private fun parseMathBlock(lines: List<String>, start: Int): MathBlock? {
             open = "\\["
             close = "\\]"
         }
-        first.startsWith("\\begin{") -> {
-            val env = BEGIN_ENV.find(first)?.groupValues?.get(1).orEmpty()
-            if (env.isEmpty()) return null
-            open = "\\begin{$env}"
-            close = "\\end{$env}"
-        }
         else -> return null
     }
 
     val sb = StringBuilder()
     val remainder = first.removePrefix(open)
     if (remainder.contains(close)) {
-        val code = latexBlockToCode(remainder.substringBefore(close))
-        return if (code.isBlank()) null else MathBlock(code, start)
+        val latex = remainder.substringBefore(close).trim()
+        return if (latex.isBlank()) null else MathBlock(latex, start)
     }
     if (remainder.isNotBlank()) sb.append(remainder)
 
@@ -262,8 +288,8 @@ private fun parseMathBlock(lines: List<String>, start: Int): MathBlock? {
                 if (sb.isNotEmpty()) sb.append('\n')
                 sb.append(before)
             }
-            val code = latexBlockToCode(sb.toString())
-            return if (code.isBlank()) null else MathBlock(code, i)
+            val latex = sb.toString().trim()
+            return if (latex.isBlank()) null else MathBlock(latex, i)
         }
         if (sb.isNotEmpty()) sb.append('\n')
         sb.append(current)
@@ -271,8 +297,8 @@ private fun parseMathBlock(lines: List<String>, start: Int): MathBlock? {
     }
 
     // 没有闭合（流式截断）：剩下的都按公式处理
-    val code = latexBlockToCode(sb.toString())
-    return if (code.isBlank()) null else MathBlock(code, lines.size - 1)
+    val latex = sb.toString().trim()
+    return if (latex.isBlank()) null else MathBlock(latex, lines.size - 1)
 }
 
 private val FRAC = Regex("""\\(?:d|t)?frac\{([^{}]*)\}\{([^{}]*)\}""")
@@ -332,8 +358,16 @@ private fun buildInline(
     accent: Color,
     codeBackground: Color,
     codeColor: Color,
-    mono: FontFamily
+    mono: FontFamily,
+    /** 行内公式渲染器：返回占位符 id，返回 null 表示渲染失败、走纯文本兜底 */
+    mathResolver: ((String) -> String?)? = null
 ): AnnotatedString = buildAnnotatedString {
+    fun appendMath(latex: String) {
+        val id = mathResolver?.invoke(latex)
+        val fallback = latexToPlain(latex)
+        if (id != null) appendInlineContent(id, fallback) else append(fallback)
+    }
+
     var cursor = 0
     for (match in INLINE.findAll(raw)) {
         if (match.range.first > cursor) {
@@ -386,16 +420,16 @@ private fun buildInline(
                 append(groups[9])
                 pop()
             }
-            // \( ... \)：去掉命令，按普通文本展示
-            groups[10].isNotEmpty() -> append(latexToPlain(groups[10]))
+            // \( ... \)：渲染成行内公式图，失败回退纯文本
+            groups[10].isNotEmpty() -> appendMath(groups[10])
             // $$ ... $$（段落中间出现的块级写法）
-            groups[11].isNotEmpty() -> append(latexToPlain(groups[11]))
-            // $ ... $：像公式才转换，货币（$5 and $10）原样保留
+            groups[11].isNotEmpty() -> appendMath(groups[11])
+            // $ ... $：像公式才处理，货币（$5 and $10）原样保留
             groups[12].isNotEmpty() -> {
                 val content = groups[12]
                 val looksLikeMath = content.contains('\\') || content.contains('^') ||
                     content.contains('_') || content.contains('=')
-                append(if (looksLikeMath) latexToPlain(content) else match.value)
+                if (looksLikeMath) appendMath(content) else append(match.value)
             }
             // 裸露的 \text{...}、\frac{a}{b}、\alpha 等也转成可读文本
             groups[13].isNotEmpty() -> append(latexToPlain(match.value))
@@ -406,14 +440,64 @@ private fun buildInline(
     if (cursor < raw.length) append(raw.substring(cursor))
 }
 
+private class InlineRendered(
+    val text: AnnotatedString,
+    val inlineContent: Map<String, InlineTextContent>
+)
+
 @Composable
-fun inlineText(raw: String): AnnotatedString {
+private fun renderInline(raw: String, style: TextStyle): InlineRendered {
+    val context = LocalContext.current
+    val density = LocalDensity.current
     val accent = MaterialTheme.colorScheme.primary
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant
     val codeColor = MaterialTheme.colorScheme.onSurfaceVariant
-    return remember(raw, accent, codeBackground, codeColor) {
-        buildInline(raw, accent, codeBackground, codeColor, FontFamily.Monospace)
+    val mathColor = MaterialTheme.colorScheme.onSurface.toArgb()
+    val fontSize = style.fontSize.takeOrElse { 16.sp }
+    val sizePx = with(density) { fontSize.toPx() }
+    return remember(raw, accent, codeBackground, codeColor, mathColor, sizePx) {
+        val contents = LinkedHashMap<String, InlineTextContent>()
+        var counter = 0
+        val text = buildInline(raw, accent, codeBackground, codeColor, FontFamily.Monospace) { latex ->
+            val bitmap = MathRenderer.render(context, latex, sizePx, mathColor)
+                ?: return@buildInline null
+            val id = "math${counter++}"
+            val width = with(density) { bitmap.width.toSp() }
+            val height = with(density) { bitmap.height.toSp() }
+            contents[id] = InlineTextContent(
+                Placeholder(width, height, PlaceholderVerticalAlign.TextCenter)
+            ) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = latex,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            id
+        }
+        InlineRendered(text, contents)
     }
+}
+
+@Composable
+private fun MdInlineText(
+    raw: String,
+    style: TextStyle,
+    color: Color,
+    modifier: Modifier = Modifier,
+    maxLines: Int = Int.MAX_VALUE,
+    overflow: TextOverflow = TextOverflow.Clip
+) {
+    val rendered = renderInline(raw, style)
+    Text(
+        text = rendered.text,
+        style = style,
+        color = color,
+        modifier = modifier,
+        maxLines = maxLines,
+        overflow = overflow,
+        inlineContent = rendered.inlineContent
+    )
 }
 
 @Composable
@@ -427,14 +511,14 @@ fun MarkdownText(
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         for (block in blocks) {
             when (block) {
-                is MdBlock.Paragraph -> Text(
-                    text = inlineText(block.raw),
+                is MdBlock.Paragraph -> MdInlineText(
+                    raw = block.raw,
                     style = style,
                     color = onSurface
                 )
 
-                is MdBlock.Heading -> Text(
-                    text = inlineText(block.raw),
+                is MdBlock.Heading -> MdInlineText(
+                    raw = block.raw,
                     style = style.copy(
                         fontWeight = FontWeight.SemiBold,
                         fontSize = when (block.level) {
@@ -449,6 +533,8 @@ fun MarkdownText(
 
                 is MdBlock.Code -> CodeBlock(block.language, block.code)
 
+                is MdBlock.Math -> MathBlockView(block.latex)
+
                 is MdBlock.ListItem -> Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -461,8 +547,8 @@ fun MarkdownText(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.width(20.dp)
                     )
-                    Text(
-                        text = inlineText(block.raw),
+                    MdInlineText(
+                        raw = block.raw,
                         style = style,
                         color = onSurface,
                         modifier = Modifier.weight(1f)
@@ -476,8 +562,8 @@ fun MarkdownText(
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        text = inlineText(block.raw),
+                    MdInlineText(
+                        raw = block.raw,
                         style = style.copy(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
@@ -487,6 +573,39 @@ fun MarkdownText(
                 MdBlock.Rule -> HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
         }
+    }
+}
+
+/** 块级公式：居中显示；渲染失败回退到等宽代码块，不能空白 */
+@Composable
+private fun MathBlockView(latex: String) {
+    val context = LocalContext.current
+    val density = LocalDensity.current
+    val color = MaterialTheme.colorScheme.onSurface.toArgb()
+    val sizePx = with(density) { 18.sp.toPx() }
+    val bitmap = remember(latex, sizePx, color) {
+        MathRenderer.render(context, latex, sizePx, color)
+    }
+    if (bitmap == null) {
+        CodeBlock("math", latexBlockToCode(latex))
+        return
+    }
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        val width = with(density) { bitmap.width.toDp() }
+        val height = with(density) { bitmap.height.toDp() }
+        val scale = if (width > maxWidth) maxWidth.value / width.value else 1f
+        Image(
+            bitmap = bitmap.asImageBitmap(),
+            contentDescription = latex,
+            modifier = Modifier
+                .width(width * scale)
+                .height(height * scale)
+        )
     }
 }
 
@@ -553,8 +672,8 @@ private fun TableRow(
             .background(if (header) headerBackground else Color.Transparent)
     ) {
         for (index in 0 until columns) {
-            Text(
-                text = inlineText(cells.getOrElse(index) { "" }),
+            MdInlineText(
+                raw = cells.getOrElse(index) { "" },
                 style = MaterialTheme.typography.bodySmall.copy(
                     fontWeight = if (header) FontWeight.SemiBold else FontWeight.Normal
                 ),

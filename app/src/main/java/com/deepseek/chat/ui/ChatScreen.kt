@@ -127,7 +127,8 @@ fun ChatScreen(
     }
     LaunchedEffect(state.notice) {
         val notice = state.notice
-        if (notice != null) {
+        // 设置页自己有 Snackbar 宿主，这里只在对话页消费，避免两边抢同一个 notice
+        if (notice != null && !state.showSettings) {
             snackbarHostState.showSnackbar(notice)
             onClearNotice()
         }

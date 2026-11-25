@@ -18,7 +18,7 @@ class BuiltinPromptsTest {
 
         assertTrue(composed.startsWith("你是一个简洁的中文助手。"))
         assertTrue(composed.contains("数学输出规则"))
-        assertTrue(composed.contains("不要使用 LaTeX"))
+        assertTrue(composed.contains("数学公式请用 LaTeX"))
     }
 
     @Test

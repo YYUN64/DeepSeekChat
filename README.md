@@ -18,12 +18,12 @@
 | --- | --- |
 | 图片上传 | 从相册选图，自动缩放（最长边 1600px）并按 EXIF 旋转，以 base64 内联发送；使用 `deepseek-flash` 的原生视觉能力（支持 JPEG/PNG/GIF/WebP） |
 | 联网 | 声明服务端工具 `deepseek_web_search` + `deepseek_read_url`：模型自己决定是否搜索、是否读取消息里的链接，搜索和抓取都在 DeepSeek 服务端完成；回答下方展示「参考来源」。设置里可关闭（默认开），搜索/抓取按次计费 |
-| MCP | 可选（默认关）：设置里填 MCP 服务器 IPv4 + 端口（`http://<ip>:<port>/mcp`），App 作为 MCP 客户端把工具交给模型调用，工具真实执行在 MCP 服务器上；支持「测试连接」列出工具名。开启时自动关闭上面的服务端联网工具。配套服务器已拆分为独立仓库 [pocket-mcp](https://github.com/YYUN64/pocket-mcp)：纯标准库单文件 Python，Linux/Windows 均可部署 |
+| MCP | 可选（默认关）：设置里填 MCP 服务器 IPv4 + 端口（`http://<ip>:<port>/mcp`）和 Token（可选，对应服务端 `MCP_TOKEN`），App 作为 MCP 客户端把工具交给模型调用，工具真实执行在 MCP 服务器上；工具调用轮数可选 2/4/8/不限（内部上限 64）；支持「测试连接」列出工具名。开启时自动关闭上面的服务端联网工具。配套服务器已拆分为独立仓库 [pocket-mcp](https://github.com/YYUN64/pocket-mcp)：纯标准库单文件 Python，Linux/Windows 均可部署，现已支持 Bearer token 鉴权 |
 | 思考深度 | 四档「推理等级」：关闭 / 低 / 高 / 极致（与 DeepSeek Harness 的 off/low/high/max 一致）；思考过程以可折叠面板展示，流式输出 |
 | 会话历史 | 每个会话一个 JSON 文件，自动命名、重命名、删除、清空；重启后自动恢复最近会话 |
 | 上下文长度 | 16K / 32K / 64K / 128K / 256K / 512K / 1M 可选，超出预算自动丢弃最早的对话；顶栏实时显示估算用量 |
 
-另外还有：流式打字机输出（SSE）、Markdown 渲染（代码块高亮底色 + 一键复制）、停止生成、重新生成、复制回答、深色模式、系统提示词、自定义 Base URL（可接任意 OpenAI 兼容网关）、token 用量展示。
+另外还有：流式打字机输出（SSE）、Markdown 渲染（表格、代码块底色 + 一键复制、**LaTeX 数学公式**）、停止生成、重新生成、复制回答、深色模式、系统提示词、自定义 Base URL（可接任意 OpenAI 兼容网关）、token 用量展示。
 
 ## 环境与构建
 
@@ -116,3 +116,4 @@ app/src/main/java/com/deepseek/chat/
 - 思考模式下 `temperature` / `top_p` 基本无效（DeepSeek 的限制），所以没有做这两个滑杆。
 - 上下文用量：优先用服务端最近一次返回的 `usage` 做锚点（`prompt + completion` 即该轮完整 token），锚点之后新增的消息才用启发式估算补齐；还没有实测数据时整体走估算，此时界面显示 `≈`。启发式为中文按 1 字 ≈ 1 token、其它 4 字符 ≈ 1 token、每张图 1024 token，与真实计费有偏差，以回答下方的服务端 usage 为准。
 - `tools/` 下是开发期的自检脚本（括号配平、import 一致性、Markdown/SSE 解析逻辑的等价实现测试），跑 `node tools/check-brackets.js app/src/main/java` 即可，不参与 App 构建。
+- 数学公式由 [JLaTeXMath-Android](https://github.com/noties/jlatexmath-android)（`ru.noties:jlatexmath-android`，许可证 **GPL-2.0**）渲染成图片；内置提示词会引导模型用 `$$...$$` / `\[...\]` / `\(...\)` 输出公式，模型仍输出别的写法时按文本安全兜底。若要把这个 App 作为闭源商业应用分发，需要先处理该依赖的 GPL 许可（这个项目是自用侧载，不受影响）。

@@ -435,7 +435,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             if (settings.mcpEnabled && settings.mcpHost.isNotBlank()) {
                 try {
                     val prepared = withContext(Dispatchers.IO) {
-                        val client = McpClient(settings.mcpHost, settings.mcpPort)
+                        val client = McpClient(settings.mcpHost, settings.mcpPort, settings.mcpToken)
                         client.initialize()
                         client to client.listTools()
                     }
@@ -457,6 +457,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             val requestMessages = history.toMutableList()
             var rounds = 0
+            // 工具轮数上限来自设置（64 = 「不限」，内部仍封顶 64）
+            val maxToolRounds = settings.effectiveMcpRounds()
             var webFallback = false
             // 已显示的内容只追加不清空：模型先说话、再调用工具时，前面的文字必须留在屏幕上。
             // 但每次工具调用都会把「本轮」增量固化成一条消息，下一轮从空白重新开始，
@@ -507,8 +509,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     val calls = result.toolCallsJson
                     val activeMcp = mcp
                     if (calls.isNullOrBlank() || activeMcp == null) break
-                    if (rounds >= MAX_TOOL_ROUNDS) {
-                        failure = "工具调用超过 $MAX_TOOL_ROUNDS 轮，已停止"
+                    if (rounds >= maxToolRounds) {
+                        failure = "工具调用超过 $maxToolRounds 轮，已停止"
                         break
                     }
                     rounds++
@@ -784,7 +786,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(notice = "正在连接 MCP…") }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val client = McpClient(settings.mcpHost, settings.mcpPort)
+                    val client = McpClient(settings.mcpHost, settings.mcpPort, settings.mcpToken)
                     client.initialize()
                     client.listTools()
                 }
@@ -880,7 +882,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         const val MAX_IMAGES = 6
-        const val MAX_TOOL_ROUNDS = 4
         const val MAX_TOOL_OUTPUT = 8000
 
         /** 流式文本推给 UI 的最小间隔 */

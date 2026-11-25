@@ -27,4 +27,27 @@ class SettingsTest {
         assertNull(Settings.parsePort("-1"))
         assertNull(Settings.parsePort("999999999999999999999"))
     }
+
+    @Test
+    fun `mcp token and rounds defaults`() {
+        val settings = Settings()
+        assertEquals("", settings.mcpToken)
+        assertEquals(4, settings.mcpMaxRounds)
+        assertEquals(4, settings.effectiveMcpRounds())
+    }
+
+    @Test
+    fun `effective mcp rounds is clamped to 1 through 64`() {
+        assertEquals(2, Settings(mcpMaxRounds = 2).effectiveMcpRounds())
+        assertEquals(64, Settings(mcpMaxRounds = 64).effectiveMcpRounds())
+        assertEquals(1, Settings(mcpMaxRounds = 0).effectiveMcpRounds())
+        assertEquals(64, Settings(mcpMaxRounds = 999).effectiveMcpRounds())
+    }
+
+    @Test
+    fun `mcp token maps to bearer header only when non blank`() {
+        assertNull(McpClient.authorizationHeader(""))
+        assertNull(McpClient.authorizationHeader("   "))
+        assertEquals("Bearer secret", McpClient.authorizationHeader(" secret "))
+    }
 }
