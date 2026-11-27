@@ -20,6 +20,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -47,10 +53,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -124,32 +133,63 @@ fun ChatScreen(
         append(ContextLimits.label(state.settings.contextTokens))
     }
 
-    // 列表用 reverseLayout 贴底（越靠前的 item 越靠视觉底部）：内容长高时由布局直接吸收，
-    // 不需要每来一个字就手动 scroll，也就不存在「先长出来、下一帧再弹回」的上下跳。
+    // 列表用 reverseLayout 贴底（越靠前的 item 越靠视觉底部）。
     //
-    // 但「新 item 插入」不会自动跟随：工具卡片（TOOL_STEP）是追加到 messages 末尾的，
-    // reverseLayout + key 会把原来的可见 item 钉住，新卡片落在视口下方。
-    // 所以这里记录「用户是否想跟底」：只在用户手动滚动结束/程序滚动结束时更新，
-    // 插入新 item 不会把状态误判成「用户上翻过」。
+    // 跟随规则（1.8.3 修「往上翻还被拽回底部」）：
+    //  - 手指一碰（isScrollInProgress 变 true）立刻停止跟随，不等松手；
+    //  - 松手后只有真正贴底（index 0 + offset 0）才恢复跟随；
+    //  - 跟随只用瞬时 scrollToItem，绝不 animate（避免和手势抢）；
+    //  - isScrollInProgress 期间不许自动滚动；
+    //  - 不跟随时把流式气泡的内容**冻结**在用户上翻那一刻，否则气泡继续长高，
+    //    reverseLayout 会把上面的内容整体推走（这才是「停不下来」的真正原因）。
     var followBottom by remember { mutableStateOf(true) }
+    // 用户一拖动就停跟随（NestedScrollConnection 比 isScrollInProgress 更早、更可靠）
+    val scrollConnection = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.Drag && available.y != 0f) {
+                    followBottom = false
+                }
+                return Offset.Zero
+            }
+        }
+    }
+    var frozenStream by remember { mutableStateOf<String?>(null) }
+    var frozenReasoning by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
-            if (!scrolling) {
-                // reverseLayout：index 0 + offset 0 才是真正贴底
-                followBottom = listState.firstVisibleItemIndex == 0 &&
-                    listState.firstVisibleItemScrollOffset == 0
-            }
+            followBottom = ChatScroll.nextFollowing(
+                scrolling = scrolling,
+                atBottom = ChatScroll.atBottom(
+                    listState.firstVisibleItemIndex,
+                    listState.firstVisibleItemScrollOffset
+                )
+            )
+        }
+    }    // 上翻时冻结流式文本（松手后也保持冻结，直到回到底部/恢复跟随）
+    LaunchedEffect(followBottom, state.streaming) {
+        if (!followBottom && state.streaming) {
+            frozenStream = state.streamText
+            frozenReasoning = state.streamReasoning
+        } else if (followBottom) {
+            frozenStream = null
+            frozenReasoning = null
         }
     }
     // 打开/切换会话：直接贴底
     LaunchedEffect(conversation?.id) {
         followBottom = true
+        frozenStream = null
+        frozenReasoning = null
         if (state.messages.isNotEmpty() || state.streaming) listState.scrollToItem(0)
     }
-    // 新消息 / 工具卡片插入或隐藏 / 流式重新开始：贴底时平滑跟到底
+    // 新消息 / 工具卡片插入或隐藏 / 流式重新开始：贴底且用户没在滑动时才瞬时跟到底
     LaunchedEffect(messages.size, state.streaming, state.toolStatus) {
-        if (followBottom) listState.animateScrollToItem(0)
+        if (followBottom && !listState.isScrollInProgress) listState.scrollToItem(0)
     }
+    val scope = rememberCoroutineScope()
+    val streamTextForUi = frozenStream ?: state.streamText
+    val streamReasoningForUi = frozenReasoning ?: state.streamReasoning
     LaunchedEffect(state.notice) {
         val notice = state.notice
         // 设置页自己有 Snackbar 宿主，这里只在对话页消费，避免两边抢同一个 notice
@@ -209,6 +249,20 @@ fun ChatScreen(
         },
         bottomBar = {
             Column {
+                // 上翻阅读时提供「回到底部」：点了恢复跟随并瞬时贴底
+                if (!followBottom && state.streaming) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = {
+                            followBottom = true
+                            frozenStream = null
+                            frozenReasoning = null
+                            scope.launch { listState.scrollToItem(0) }
+                        }) { Text("回到底部 ↓") }
+                    }
+                }
                 val error = state.error
                 if (error != null) {
                     ErrorBanner(message = error, onDismiss = onDismissError, onBypass = if (state.mcpBypassAvailable) onBypassMcp else null)
@@ -251,7 +305,19 @@ fun ChatScreen(
                 reverseLayout = true,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding),
+                    .padding(innerPadding)
+                    .nestedScroll(scrollConnection)
+                    // 手指一碰（甚至只是按住）就停止跟随：isScrollInProgress 在快速滑动时
+                    // 可能来不及被 snapshotFlow 采样，pointerInput 保证 Start 立刻生效。
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            followBottom = false
+                            do {
+                                val event = awaitPointerEvent()
+                            } while (event.changes.any { it.pressed })
+                        }
+                    },
                 // reverseLayout 下 top/bottom 是反的：start 是视觉底部
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp)
@@ -265,8 +331,8 @@ fun ChatScreen(
                             msg = Msg(
                                 id = "streaming",
                                 role = Role.ASSISTANT,
-                                text = state.streamText,
-                                reasoning = state.streamReasoning,
+                                text = streamTextForUi,
+                                reasoning = streamReasoningForUi,
                                 model = model
                             ),
                             streaming = true,
