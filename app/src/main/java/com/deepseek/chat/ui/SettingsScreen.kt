@@ -91,6 +91,7 @@ fun SettingsScreen(
     var showRegenerateConfirm by remember { mutableStateOf(false) }
     var oneTimePublicKey by remember { mutableStateOf<String?>(null) }
     var showResetCertConfirm by remember { mutableStateOf(false) }
+    var showToolsPage by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
     fun generateKeyNow() {
         if (McpSigner.generateKey()) {
@@ -399,14 +400,14 @@ fun SettingsScreen(
                         modifier = Modifier.padding(top = 4.dp, bottom = 6.dp)
                     )
 
-                    // 工具清单：可折叠，每个工具可单独开关（关闭的不发给模型）
+                    // 工具清单入口：测试连接成功后只显示一行，点进去才是列表 + 开关
                     if (mcpTools.isNotEmpty()) {
-                        var toolsExpanded by remember { mutableStateOf(true) }
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { toolsExpanded = !toolsExpanded }
-                                .padding(vertical = 6.dp),
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { showToolsPage = true }
+                                .padding(vertical = 10.dp, horizontal = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
@@ -416,19 +417,10 @@ fun SettingsScreen(
                             )
                             Spacer(modifier = Modifier.weight(1f))
                             Text(
-                                text = if (toolsExpanded) "收起" else "展开",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary
+                                text = "›",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                        }
-                        if (toolsExpanded) {
-                            for (tool in mcpTools) {
-                                ToolToggleRow(
-                                    tool = tool,
-                                    enabled = tool.name !in settings.disabledMcpTools,
-                                    onToggle = { onToggleTool(tool.name, it) }
-                                )
-                            }
                         }
                     }
 
@@ -766,6 +758,34 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showResetCertConfirm = false }) { Text("取消") }
+            }
+        )
+    }
+
+    // 工具二级页：列表 + 开关（测试连接后不再自动展开）
+    if (showToolsPage) {
+        AlertDialog(
+            onDismissRequest = { showToolsPage = false },
+            title = { Text("MCP 工具") },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    Text(
+                        text = mcpServerLabel?.let { "$it · ${mcpTools.size} 个工具" } ?: "未连接",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                    for (tool in mcpTools) {
+                        ToolToggleRow(
+                            tool = tool,
+                            enabled = tool.name !in settings.disabledMcpTools,
+                            onToggle = { onToggleTool(tool.name, it) }
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showToolsPage = false }) { Text("完成") }
             }
         )
     }

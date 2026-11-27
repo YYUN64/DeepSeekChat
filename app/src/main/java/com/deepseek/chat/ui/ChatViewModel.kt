@@ -89,6 +89,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     @Volatile
     private var activeMcp: McpClient? = null
 
+    /** send() 预连接好的 MCP（initialize + tools/list），交给 launchCompletion 复用 */
+    private var preparedTools: Pair<McpClient, List<McpTool>>? = null
+
     /** 请求轮次：取消/切换后用来丢弃过期回合的回写 */
     private var round = 0
 
@@ -375,25 +378,53 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        // 首次连接（HTTPS 且还没信任过证书）：先探测指纹并让用户确认，确认前不发任何请求，
-        // 输入框保持原样；取消时用户打的字不会丢。
         val settings = snapshot.settings
-        if (settings.mcpEnabled && settings.mcpHttps &&
-            settings.mcpCertFingerprint.isBlank() && settings.mcpHost.isNotBlank()
-        ) {
+        // MCP 开着就必须真的可用：先连一次拿工具，失败或过滤后为空 → 本轮不发送（输入框保留）
+        if (settings.mcpEnabled && settings.mcpHost.isNotBlank()) {
             viewModelScope.launch {
-                val probe = withContext(Dispatchers.IO) {
-                    runCatching {
-                        McpTls.probeFingerprint(McpEndpoint.hostOnly(settings.mcpHost), settings.mcpPort)
-                    }
+                _state.update { it.copy(notice = "正在连接 MCP…") }
+                val prepared = withContext(Dispatchers.IO) {
+                    runCatching { prepareMcp(settings, TEST_CONNECT_TIMEOUT_MS) }
                 }
-                probe.onSuccess { fingerprint ->
-                    _state.update {
-                        it.copy(pendingCertFingerprint = fingerprint, pendingCertRetryChat = true)
+                val failure = prepared.exceptionOrNull()
+                when {
+                    failure is UntrustedCertException -> {
+                        _state.update {
+                            it.copy(notice = null, pendingCertFingerprint = failure.fingerprint, pendingCertRetryChat = true)
+                        }
                     }
-                }.onFailure {
-                    // 探测失败（网络不通等）就按正常流程走，让真实请求给出错误信息
-                    proceedSend(snapshot)
+                    failure is CertMismatchException -> {
+                        _state.update {
+                            it.copy(
+                                notice = null,
+                                error = "证书指纹不匹配（可能是中间人，或服务端换了证书）；如确认更换请在设置里重置信任，本轮未发送"
+                            )
+                        }
+                    }
+                    failure != null -> {
+                        _state.update {
+                            it.copy(
+                                notice = null,
+                                error = "MCP 服务器连接失败：${describeMcpError(failure)}。本轮未发送"
+                            )
+                        }
+                    }
+                    else -> {
+                        val (client, tools) = prepared.getOrThrow()
+                        val enabled = McpToolFilter.enabledTools(tools, settings.disabledMcpTools)
+                        if (enabled.isEmpty()) {
+                            _state.update {
+                                it.copy(
+                                    notice = null,
+                                    error = "MCP 没有可用工具（可能全部被关闭或服务器没提供工具），本轮未发送"
+                                )
+                            }
+                        } else {
+                            preparedTools = Pair(client, tools)
+                            _state.update { it.copy(notice = null) }
+                            proceedSend(snapshot)
+                        }
+                    }
                 }
             }
             return
@@ -402,9 +433,30 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         proceedSend(snapshot)
     }
 
+    /** 连接 MCP：initialize + tools/list（用完即断，不缓存会话） */
+    private suspend fun prepareMcp(settings: Settings, timeoutMs: Int): Pair<McpClient, List<McpTool>> =
+        withContext(Dispatchers.IO) {
+            val client = McpClient(
+                settings.mcpHost,
+                settings.mcpPort,
+                settings.mcpHttps,
+                settings.mcpCertFingerprint,
+                getApplication(),
+                timeoutMs
+            )
+            client.initialize()
+            client to client.listTools()
+        }
+
+    private fun describeMcpError(error: Throwable): String =
+        if (error is java.net.SocketTimeoutException) {
+            "连接超时（3 秒），请检查地址/端口/网络"
+        } else {
+            error.message ?: error.javaClass.simpleName
+        }
+
     /** 真正把用户消息加入会话并发起请求（send/重试共用） */
-    private fun proceedSend(snapshot: ChatUiState) {
-        val text = snapshot.input.trim()
+    private fun proceedSend(snapshot: ChatUiState) {        val text = snapshot.input.trim()
         val images = snapshot.pendingImages
         if (text.isEmpty() && images.isEmpty()) return
 
@@ -521,22 +573,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             var toolCalls: String? = null
             var cancelled = false
 
-            // 只有显式开启且填了地址才去连 MCP，避免没服务器时白等
+            // send() 已经预连接好就复用；否则（regenerate 等）现场连一次
             var mcp: McpClient? = null
             var functionTools: String? = null
             if (settings.mcpEnabled && settings.mcpHost.isNotBlank()) {
                 try {
-                    val prepared = withContext(Dispatchers.IO) {
-                        val client = McpClient(
-                            settings.mcpHost,
-                            settings.mcpPort,
-                            settings.mcpHttps,
-                            settings.mcpCertFingerprint,
-                            getApplication()
-                        )
-                        client.initialize()
-                        client to client.listTools()
+                    val prepared = preparedTools ?: withContext(Dispatchers.IO) {
+                        prepareMcp(settings, 45_000)
                     }
+                    preparedTools = null
                     mcp = prepared.first
                     activeMcp = prepared.first
                     val tools = prepared.second
@@ -594,7 +639,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     reasoningStart = reasoning.length
                     val result = try {
                         client.streamChat(
-                            settings = settings,
+                            // V4 Pro 不支持服务端联网工具，带上会被 API 400；本轮自动关掉
+                            settings = if (!Models.supportsWebTools(effectiveModel) && settings.webTools) {
+                                settings.copy(webTools = false)
+                            } else {
+                                settings
+                            },
                             model = effectiveModel,
                             thinking = conversation.thinking,
                             effort = conversation.effort,
@@ -658,6 +708,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     // 2) 带 tool_calls 的 assistant 轮次接进给模型的上下文（本轮）
                     requestMessages += toolCallAssistant
                     val array = JSONArray(calls)
+                    var mcpDisconnected = false
                     for (index in 0 until array.length()) {
                         val call = array.optJSONObject(index) ?: continue
                         val function = call.optJSONObject("function")
@@ -700,6 +751,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             (failureReason?.message ?: "").contains("timed out", ignoreCase = true) ||
                             (failureReason?.message ?: "").contains("timeout", ignoreCase = true)
                         val meta = callResult?.meta
+                        // 连接中断（IOException 但不是超时）：卡片标「连接中断」并终止本轮
+                        val interrupted = failureReason is java.io.IOException && !timedOut
+                        if (interrupted) mcpDisconnected = true
                         // 取消不是失败：卡片显示「已取消 · 1.2s」，保留已捕获输出
                         if (meta?.cancelled == true) failed = false
                         updateVisible(conversation.id, myRound, stepId) {
@@ -708,6 +762,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                                 error = when {
                                     !failed -> null
                                     timedOut -> "执行超时（45 秒）：$name"
+                                    interrupted -> "连接中断：$name"
                                     else -> "调用失败：$name：${summarize(output, 180)}"
                                 },
                                 toolDurationMs = meta?.durationMs,
@@ -719,6 +774,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         }
                         val toolResult = if (timedOut) {
                             "工具执行超时（45 秒），已终止：$name"
+                        } else if (interrupted) {
+                            "工具执行失败（MCP 连接中断）：$name：${summarize(output, 200)}"
                         } else {
                             output
                         }
@@ -734,6 +791,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         requestMessages += toolMessage
                     }
                     _state.update { it.copy(toolStatus = null) }
+                    if (mcpDisconnected) {
+                        failure = "MCP 连接已断开，工具调用中止"
+                        break
+                    }
                 }
             } catch (e: CancellationException) {
                 cancelled = true
@@ -1164,5 +1225,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         /** 流式文本推给 UI 的最小间隔 */
         const val STREAM_PUSH_INTERVAL_MS = 120L
+        /** 「测试连接」和「发送前握手」的超时（工具执行仍用 45 秒） */
+        const val TEST_CONNECT_TIMEOUT_MS = 3_000
     }
 }

@@ -28,7 +28,9 @@ class McpClient(
     /** 已信任的证书指纹（TOFU）；空表示还没信任过 */
     private val pinnedFingerprint: String = "",
     /** 有 Keystore 密钥时用签名鉴权；没有密钥则请求不带鉴权（服务端未配置鉴权时才可用） */
-    private val context: android.content.Context? = null
+    private val context: android.content.Context? = null,
+    /** 连接/读取超时（毫秒）：测试连接用 3000，工具执行用 45000 */
+    private val requestTimeoutMs: Int = 45_000
 ) {
 
     private val endpoint: String = McpEndpoint.url(host, port, https)
@@ -39,7 +41,11 @@ class McpClient(
     /** HTTPS 时先做一次 TLS 探测：没 pin 抛 UntrustedCertException，pin 不一致抛 CertMismatchException */
     private fun verifyTls() {
         if (!https || tlsVerified) return
-        val actual = McpTls.probeFingerprint(McpEndpoint.hostOnly(host), port)
+        val actual = McpTls.probeFingerprint(
+            McpEndpoint.hostOnly(host),
+            port,
+            timeoutMs = requestTimeoutMs.coerceAtMost(10_000)
+        )
         if (pinnedFingerprint.isBlank()) throw UntrustedCertException(actual)
         if (!McpTls.matches(pinnedFingerprint, actual)) {
             throw CertMismatchException(actual, pinnedFingerprint)
@@ -182,10 +188,12 @@ class McpClient(
         }
         val conn = connection.apply {
             requestMethod = "POST"
-            connectTimeout = 15_000
-            readTimeout = if (readTimeoutMs > 0) readTimeoutMs else 45_000
+            connectTimeout = requestTimeoutMs
+            readTimeout = if (readTimeoutMs > 0) readTimeoutMs else requestTimeoutMs
             doInput = true
             doOutput = true
+            // 用完即断：不保持长连接、不缓存会话
+            setRequestProperty("Connection", "close")
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("Accept", "application/json, text/event-stream")
             sessionId?.let { setRequestProperty("Mcp-Session-Id", it) }

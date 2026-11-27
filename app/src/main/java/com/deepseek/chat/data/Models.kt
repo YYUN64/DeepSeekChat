@@ -136,6 +136,9 @@ object Models {
     }
 
     fun supportsVision(model: String): Boolean = model == FLASH
+
+    /** 服务端联网工具（deepseek_web_search 等）目前只有 Flash 支持 */
+    fun supportsWebTools(model: String): Boolean = model == FLASH
 }
 
 /**
