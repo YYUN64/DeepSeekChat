@@ -11,6 +11,7 @@ import com.deepseek.chat.data.ApiException
 import com.deepseek.chat.data.CertMismatchException
 import com.deepseek.chat.data.ConversationMarkdown
 import com.deepseek.chat.data.McpEndpoint
+import com.deepseek.chat.data.McpErrors
 import com.deepseek.chat.data.McpTool
 import com.deepseek.chat.data.McpToolFilter
 import com.deepseek.chat.data.McpTls
@@ -68,7 +69,12 @@ data class ChatUiState(
     /** 上次「测试连接」拿到的工具列表（设置页展示 + 开关） */
     val mcpTools: List<McpTool> = emptyList(),
     /** 服务端标识：name version（来自 initialize 的 serverInfo） */
-    val mcpServerLabel: String? = null
+    val mcpServerLabel: String? = null,
+    /** 「测试连接」的常驻状态（成功/失败都留到下次成功或手动关闭） */
+    val mcpStatusText: String? = null,
+    val mcpStatusError: Boolean = false,
+    /** 本轮因 MCP 不可用被拦下时，显示「仅本次用普通对话」按钮 */
+    val mcpBypassAvailable: Boolean = false
 ) {
     val messages: List<Msg> get() = conversation?.messages.orEmpty()
 }
@@ -91,6 +97,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     /** send() 预连接好的 MCP（initialize + tools/list），交给 launchCompletion 复用 */
     private var preparedTools: Pair<McpClient, List<McpTool>>? = null
+
+    /** 「仅本次用普通对话」：只影响下一轮，不持久化 */
+    private var bypassMcpOnce = false
+
+    /** 本轮（正在进行）是否跳过 MCP */
+    private var bypassThisRound = false
 
     /** 请求轮次：取消/切换后用来丢弃过期回合的回写 */
     private var round = 0
@@ -380,7 +392,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         val settings = snapshot.settings
         // MCP 开着就必须真的可用：先连一次拿工具，失败或过滤后为空 → 本轮不发送（输入框保留）
-        if (settings.mcpEnabled && settings.mcpHost.isNotBlank()) {
+        if (settings.mcpEnabled && settings.mcpHost.isNotBlank() && !bypassMcpOnce) {
             viewModelScope.launch {
                 _state.update { it.copy(notice = "正在连接 MCP…") }
                 val prepared = withContext(Dispatchers.IO) {
@@ -397,7 +409,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         _state.update {
                             it.copy(
                                 notice = null,
-                                error = "证书指纹不匹配（可能是中间人，或服务端换了证书）；如确认更换请在设置里重置信任，本轮未发送"
+                                error = "证书指纹不匹配（可能是中间人，或服务端换了证书）；如确认更换请在设置里重置信任，本轮未发送",
+                                mcpBypassAvailable = true
                             )
                         }
                     }
@@ -405,7 +418,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         _state.update {
                             it.copy(
                                 notice = null,
-                                error = "MCP 服务器连接失败：${describeMcpError(failure)}。本轮未发送"
+                                error = "MCP 服务器连接失败：${describeMcpError(failure)}。本轮未发送",
+                                mcpBypassAvailable = true
                             )
                         }
                     }
@@ -416,12 +430,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             _state.update {
                                 it.copy(
                                     notice = null,
-                                    error = "MCP 没有可用工具（可能全部被关闭或服务器没提供工具），本轮未发送"
+                                    error = "MCP 没有可用工具（可能全部被关闭或服务器没提供工具），本轮未发送",
+                                    mcpBypassAvailable = true
                                 )
                             }
                         } else {
                             preparedTools = Pair(client, tools)
-                            _state.update { it.copy(notice = null) }
+                            _state.update { it.copy(notice = null, mcpBypassAvailable = false) }
                             proceedSend(snapshot)
                         }
                     }
@@ -431,6 +446,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         proceedSend(snapshot)
+    }
+
+    /** 仅本轮不带 MCP 工具发送（不写设置、下一轮仍走「MCP 必须在」） */
+    fun sendWithoutMcp() {
+        bypassMcpOnce = true
+        _state.update { it.copy(error = null, mcpBypassAvailable = false) }
+        send()
+    }
+
+    /** 手动关闭「测试连接」的常驻状态 */
+    fun clearMcpStatus() {
+        _state.update { it.copy(mcpStatusText = null, mcpStatusError = false) }
     }
 
     /** 连接 MCP：initialize + tools/list（用完即断，不缓存会话） */
@@ -448,15 +475,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             client to client.listTools()
         }
 
-    private fun describeMcpError(error: Throwable): String =
-        if (error is java.net.SocketTimeoutException) {
-            "连接超时（3 秒），请检查地址/端口/网络"
-        } else {
-            error.message ?: error.javaClass.simpleName
-        }
+    private fun describeMcpError(error: Throwable): String = McpErrors.friendly(error)
 
     /** 真正把用户消息加入会话并发起请求（send/重试共用） */
-    private fun proceedSend(snapshot: ChatUiState) {        val text = snapshot.input.trim()
+    private fun proceedSend(snapshot: ChatUiState) {
+        bypassThisRound = bypassMcpOnce
+        bypassMcpOnce = false
+        val text = snapshot.input.trim()
         val images = snapshot.pendingImages
         if (text.isEmpty() && images.isEmpty()) return
 
@@ -498,6 +523,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun regenerate() {
         val current = _state.value.conversation ?: return
         if (_state.value.streaming) return
+        bypassThisRound = false
         val kept = current.messages.toMutableList()
         // 工具调用会在 assistant 中间插入「分段正文」和「工具步骤」，重试时要一起回退到用户消息
         while (kept.isNotEmpty() && kept.last().role != Role.USER) {
@@ -576,7 +602,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             // send() 已经预连接好就复用；否则（regenerate 等）现场连一次
             var mcp: McpClient? = null
             var functionTools: String? = null
-            if (settings.mcpEnabled && settings.mcpHost.isNotBlank()) {
+            if (settings.mcpEnabled && settings.mcpHost.isNotBlank() && !bypassThisRound) {
                 try {
                     val prepared = preparedTools ?: withContext(Dispatchers.IO) {
                         prepareMcp(settings, 45_000)
@@ -1083,15 +1109,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         it.copy(
                             mcpTools = tools,
                             mcpServerLabel = label,
-                            notice = if (tools.isEmpty()) {
-                                "连上了，但服务器没有提供工具"
-                            } else {
-                                "MCP 连接成功，工具：" + tools.joinToString("、") { tool -> tool.name }
-                            }
+                            mcpStatusError = false,
+                            // 常驻状态：成功后一直显示，直到下次失败或手动关闭
+                            mcpStatusText = "已连接 · ${tools.size} 个工具",
+                            notice = null
                         )
                     }
                 }.onFailure { e ->
-                    _state.update { it.copy(notice = "MCP 连接失败：${e.message}") }
+                    _state.update {
+                        it.copy(
+                            mcpStatusError = true,
+                            mcpStatusText = "连接失败：${McpErrors.friendly(e)}",
+                            notice = null
+                        )
+                    }
                 }
             }
         }

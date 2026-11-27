@@ -75,6 +75,9 @@ fun SettingsScreen(
     pendingCertFingerprint: String?,
     mcpTools: List<McpTool>,
     mcpServerLabel: String?,
+    mcpStatusText: String?,
+    mcpStatusError: Boolean,
+    onClearMcpStatus: () -> Unit,
     onChange: (Settings) -> Unit,
     onTestMcp: () -> Unit,
     onToggleTool: (String, Boolean) -> Unit,
@@ -385,6 +388,24 @@ fun SettingsScreen(
                     if (settings.mcpCertFingerprint.isNotBlank()) {
                         TextButton(onClick = { showResetCertConfirm = true }) {
                             Text("重置信任", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+
+                    // 「测试连接」的常驻结果（不再用一闪而过的 snackbar）
+                    val status = mcpStatusText
+                    if (status != null) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = status,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (mcpStatusError) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(onClick = onClearMcpStatus) { Text("关闭") }
                         }
                     }
 

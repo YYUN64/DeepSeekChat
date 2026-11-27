@@ -63,6 +63,9 @@ fun DeepSeekApp(state: ChatUiState, vm: ChatViewModel) {
             pendingCertFingerprint = state.pendingCertFingerprint,
             mcpTools = state.mcpTools,
             mcpServerLabel = state.mcpServerLabel,
+            mcpStatusText = state.mcpStatusText,
+            mcpStatusError = state.mcpStatusError,
+            onClearMcpStatus = { vm.clearMcpStatus() },
             onChange = vm::updateSettings,
             onTestMcp = { vm.testMcp() },
             onToggleTool = { name, enabled -> vm.setToolEnabled(name, enabled) },
@@ -118,7 +121,8 @@ fun DeepSeekApp(state: ChatUiState, vm: ChatViewModel) {
             onDismissError = { vm.clearError() },
             onClearNotice = { vm.clearNotice() },
             onSetModel = { model -> vm.setModel(model) },
-            onSetReasoning = { level -> vm.setReasoning(level) }
+            onSetReasoning = { level -> vm.setReasoning(level) },
+            onBypassMcp = { vm.sendWithoutMcp() }
         )
     }
 

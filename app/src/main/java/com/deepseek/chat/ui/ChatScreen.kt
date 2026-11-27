@@ -82,6 +82,7 @@ fun ChatScreen(
     onRemoveImage: (ImageRef) -> Unit,
     onRegenerate: () -> Unit,
     onDismissError: () -> Unit,
+    onBypassMcp: () -> Unit,
     onClearNotice: () -> Unit,
     onSetModel: (String) -> Unit,
     onSetReasoning: (String) -> Unit
@@ -210,7 +211,7 @@ fun ChatScreen(
             Column {
                 val error = state.error
                 if (error != null) {
-                    ErrorBanner(message = error, onDismiss = onDismissError)
+                    ErrorBanner(message = error, onDismiss = onDismissError, onBypass = if (state.mcpBypassAvailable) onBypassMcp else null)
                 }
                 val toolStatus = state.toolStatus
                 if (toolStatus != null) {
@@ -305,7 +306,7 @@ fun ChatScreen(
 }
 
 @Composable
-private fun ErrorBanner(message: String, onDismiss: () -> Unit) {
+private fun ErrorBanner(message: String, onDismiss: () -> Unit, onBypass: (() -> Unit)? = null) {
     Surface(
         color = MaterialTheme.colorScheme.errorContainer,
         modifier = Modifier
@@ -313,8 +314,8 @@ private fun ErrorBanner(message: String, onDismiss: () -> Unit) {
             .padding(horizontal = 12.dp, vertical = 6.dp),
         shape = RoundedCornerShape(12.dp)
     ) {
+        Column(modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 4.dp)) {
         Row(
-            modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
@@ -331,6 +332,22 @@ private fun ErrorBanner(message: String, onDismiss: () -> Unit) {
                     modifier = Modifier.size(16.dp)
                 )
             }
+        }
+        if (onBypass != null) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(
+                    onClick = onBypass,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                ) {
+                    Text("仅本次用普通对话", style = MaterialTheme.typography.labelMedium)
+                }
+                Text(
+                    text = "只影响这一次",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f)
+                )
+            }
+        }
         }
     }
 }
