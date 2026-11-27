@@ -44,6 +44,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -53,6 +54,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.snapshotFlow
@@ -158,15 +161,14 @@ fun ChatScreen(
     var frozenReasoning by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
-            followBottom = ChatScroll.nextFollowing(
-                scrolling = scrolling,
-                atBottom = ChatScroll.atBottom(
-                    listState.firstVisibleItemIndex,
-                    listState.firstVisibleItemScrollOffset
-                )
+            val atBottom = ChatScroll.atBottom(
+                listState.firstVisibleItemIndex,
+                listState.firstVisibleItemScrollOffset
             )
+            followBottom = ChatScroll.nextFollowing(scrolling = scrolling, atBottom = atBottom)
         }
-    }    // 上翻时冻结流式文本（松手后也保持冻结，直到回到底部/恢复跟随）
+    }
+    // 上翻时冻结流式文本（松手后也保持冻结，直到回到底部/恢复跟随）
     LaunchedEffect(followBottom, state.streaming) {
         if (!followBottom && state.streaming) {
             frozenStream = state.streamText
@@ -249,20 +251,6 @@ fun ChatScreen(
         },
         bottomBar = {
             Column {
-                // 上翻阅读时提供「回到底部」：点了恢复跟随并瞬时贴底
-                if (!followBottom && state.streaming) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        TextButton(onClick = {
-                            followBottom = true
-                            frozenStream = null
-                            frozenReasoning = null
-                            scope.launch { listState.scrollToItem(0) }
-                        }) { Text("回到底部 ↓") }
-                    }
-                }
                 val error = state.error
                 if (error != null) {
                     ErrorBanner(message = error, onDismiss = onDismissError, onBypass = if (state.mcpBypassAvailable) onBypassMcp else null)
@@ -290,6 +278,7 @@ fun ChatScreen(
             }
         }
     ) { innerPadding ->
+        Box(modifier = Modifier.fillMaxSize()) {
         if (messages.isEmpty() && !state.streaming) {
             Box(
                 modifier = Modifier
@@ -351,6 +340,43 @@ fun ChatScreen(
                         onRegenerate = if (msg.id == lastAssistantId) onRegenerate else null,
                         onImageClick = { preview = it }
                     )
+                }
+            }
+        }
+            // 上翻阅读时的「回到底部」：覆盖在列表区域右下角（不依赖 bottomBar 重组）。
+            // 注意：state 是普通参数不是 State，derivedStateOf 捕获它不会随新 state 重算，
+            // 所以这里用普通表达式——任何一次重组都会重新求值，最可靠。
+            val showBackToBottom = !followBottom && state.streaming
+            if (showBackToBottom) {
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    shadowElevation = 6.dp,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 16.dp, bottom = 16.dp)
+                        .clickable {
+                            followBottom = true
+                            frozenStream = null
+                            frozenReasoning = null
+                            scope.launch { listState.scrollToItem(0) }
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.KeyboardArrowDown,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "回到底部",
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(start = 4.dp)
+                        )
+                    }
                 }
             }
         }
