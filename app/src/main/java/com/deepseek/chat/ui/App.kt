@@ -23,6 +23,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.deepseek.chat.data.ImageRef
+import com.deepseek.chat.data.ImageStore
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -31,10 +32,18 @@ fun DeepSeekApp(state: ChatUiState, vm: ChatViewModel) {
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
+    // 多选照片：PickMultipleVisualMedia 在 API 33+ 走系统照片选择器，
+    // 低版本（含板子的 Android 12）自动回退到 ACTION_OPEN_DOCUMENT / GET_CONTENT 的多选
     val picker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia()
+        contract = ActivityResultContracts.PickMultipleVisualMedia(ImageStore.MAX_IMAGES)
+    ) { uris ->
+        if (uris.isNotEmpty()) vm.addImages(uris)
+    }
+    // 文本文件：SAF 任意类型，选完按扩展名/NUL/大小校验（校验在 AttachmentStore + TextFiles 里）
+    val filePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
-        if (uri != null) vm.addImage(uri)
+        if (uri != null) vm.addFile(uri)
     }
     val imageLoader: (ImageRef, Int) -> android.graphics.Bitmap? = { ref, maxEdge ->
         vm.bitmapOf(ref, maxEdge)
@@ -116,7 +125,9 @@ fun DeepSeekApp(state: ChatUiState, vm: ChatViewModel) {
                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                 )
             },
+            onPickFile = { filePicker.launch(arrayOf("*/*")) },
             onRemoveImage = { ref -> vm.removeImage(ref) },
+            onRemoveFile = { index -> vm.removeFile(index) },
             onRegenerate = { vm.regenerate() },
             onDismissError = { vm.clearError() },
             onClearNotice = { vm.clearNotice() },

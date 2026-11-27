@@ -9,7 +9,11 @@ import androidx.lifecycle.viewModelScope
 import com.deepseek.chat.ChatService
 import com.deepseek.chat.data.ApiException
 import com.deepseek.chat.data.CertMismatchException
+import com.deepseek.chat.data.AttachmentStore
 import com.deepseek.chat.data.ConversationMarkdown
+import com.deepseek.chat.data.FileReadResult
+import com.deepseek.chat.data.TextAttachment
+import com.deepseek.chat.data.TextFiles
 import com.deepseek.chat.data.McpEndpoint
 import com.deepseek.chat.data.McpErrors
 import com.deepseek.chat.data.McpTool
@@ -53,6 +57,8 @@ data class ChatUiState(
     val conversation: Conversation? = null,
     val input: String = "",
     val pendingImages: List<ImageRef> = emptyList(),
+    /** 待发送的文本附件（内容只在内存，发送时拼进消息文本） */
+    val pendingFiles: List<TextAttachment> = emptyList(),
     val streaming: Boolean = false,
     val streamText: String = "",
     val streamReasoning: String = "",
@@ -83,6 +89,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val settingsStore = SettingsStore(application)
     private val imageStore = ImageStore(application)
+    private val attachmentStore = AttachmentStore(application)
     private val chatStore = ChatStore(File(application.filesDir, "chat"))
     private val client = DeepSeekClient(imageStore)
 
@@ -148,25 +155,53 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         return bitmap
     }
 
-    fun addImage(uri: Uri) {
+    /** 单张（兼容旧入口） */
+    fun addImage(uri: Uri) = addImages(listOf(uri))
+
+    /**
+     * 多选照片：一次导入多张，超过 [ImageStore.MAX_IMAGES] 的部分丢弃并提示。
+     */
+    fun addImages(uris: List<Uri>) {
+        if (uris.isEmpty()) return
         val current = _state.value
-        if (current.pendingImages.size >= MAX_IMAGES) {
-            _state.update { it.copy(error = "一条消息最多 $MAX_IMAGES 张图片") }
+        val room = (ImageStore.MAX_IMAGES - current.pendingImages.size).coerceAtLeast(0)
+        if (room <= 0) {
+            toast("一条消息最多 ${ImageStore.MAX_IMAGES} 张图片")
             return
         }
+        if (uris.size > room) {
+            toast("最多还能添加 $room 张，其余 ${uris.size - room} 张已丢弃")
+        }
+        val accepted = uris.take(room)
         val session = inputSession
         viewModelScope.launch {
-            val ref = withContext(Dispatchers.IO) { imageStore.import(uri) }
-            when {
-                ref == null -> _state.update { it.copy(error = "这张图片读取失败了，换一张试试") }
-                session != inputSession -> ref?.let { imageStore.delete(listOf(it)) }
-                else -> _state.update { state ->
-                    if (state.pendingImages.size >= MAX_IMAGES) {
-                        state.copy(error = "一条消息最多 $MAX_IMAGES 张图片")
+            var failed = 0
+            for (uri in accepted) {
+                val ref = withContext(Dispatchers.IO) { imageStore.import(uri) }
+                if (ref == null) {
+                    failed++
+                    continue
+                }
+                if (session != inputSession) {
+                    imageStore.delete(listOf(ref))
+                    continue
+                }
+                var rejected = false
+                _state.update { state ->
+                    if (state.pendingImages.size >= ImageStore.MAX_IMAGES) {
+                        rejected = true
+                        state
                     } else {
                         state.copy(pendingImages = state.pendingImages + ref, error = null)
                     }
                 }
+                if (rejected) {
+                    imageStore.delete(listOf(ref))
+                    break
+                }
+            }
+            if (failed > 0) {
+                _state.update { it.copy(error = "有 $failed 张图片读取失败，已跳过") }
             }
         }
     }
@@ -176,6 +211,52 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(pendingImages = it.pendingImages.filterNot { image -> image.fileName == ref.fileName })
         }
         imageStore.delete(listOf(ref))
+    }
+
+    // ---------------------------------------------------------------- 文本文件
+
+    /**
+     * 读取一个文本文件作为附件：类型/NUL/大小校验都在 [TextFiles] 里做，
+     * 这里只负责数量、总大小和会话令牌。
+     */
+    fun addFile(uri: Uri) {
+        val session = inputSession
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { attachmentStore.read(uri) }
+            when (result) {
+                is FileReadResult.Rejected -> toast(result.reason)
+                is FileReadResult.Ok -> {
+                    val attachment = result.attachment
+                    if (session != inputSession) return@launch
+                    val state = _state.value
+                    val check = TextFiles.checkAdd(state.pendingFiles, attachment)
+                    if (!check.allowed) {
+                        toast(check.reason ?: "无法添加这个文件")
+                        return@launch
+                    }
+                    _state.update {
+                        it.copy(pendingFiles = it.pendingFiles + attachment, error = null)
+                    }
+                    if (attachment.truncated) {
+                        toast("${attachment.name} 超过 ${TextFiles.sizeLabel(TextFiles.MAX_FILE_BYTES.toLong())}，已截断")
+                    }
+                }
+            }
+        }
+    }
+
+    fun removeFile(index: Int) {
+        _state.update { state ->
+            if (index !in state.pendingFiles.indices) {
+                state
+            } else {
+                state.copy(pendingFiles = state.pendingFiles.filterIndexed { i, _ -> i != index })
+            }
+        }
+    }
+
+    private fun toast(text: String) {
+        Toast.makeText(getApplication(), text, Toast.LENGTH_SHORT).show()
     }
 
     // ---------------------------------------------------------------- 会话
@@ -196,6 +277,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 conversation = conversation,
                 input = "",
                 pendingImages = emptyList(),
+                pendingFiles = emptyList(),
                 streamText = "",
                 streamReasoning = "",
                 error = null,
@@ -278,6 +360,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 conversation = conversation,
                 input = "",
                 pendingImages = emptyList(),
+                pendingFiles = emptyList(),
                 streamText = "",
                 streamReasoning = "",
                 error = null,
@@ -349,6 +432,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 conversation = null,
                 input = "",
                 pendingImages = emptyList(),
+                pendingFiles = emptyList(),
                 streamText = "",
                 streamReasoning = ""
             )
@@ -383,7 +467,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (snapshot.streaming) return
         val text = snapshot.input.trim()
         val images = snapshot.pendingImages
-        if (text.isEmpty() && images.isEmpty()) return
+        if (text.isEmpty() && images.isEmpty() && snapshot.pendingFiles.isEmpty()) return
 
         if (!snapshot.settings.hasKey) {
             _state.update { it.copy(showSettings = true, error = "请先在设置里填好 API Key") }
@@ -481,7 +565,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private fun proceedSend(snapshot: ChatUiState) {
         bypassThisRound = bypassMcpOnce
         bypassMcpOnce = false
-        val text = snapshot.input.trim()
+        // 文本附件在这里拼进消息正文（超长时丢尾部的文件）
+        val composed = TextFiles.compose(snapshot.input, snapshot.pendingFiles)
+        val text = composed.text
         val images = snapshot.pendingImages
         if (text.isEmpty() && images.isEmpty()) return
 
@@ -497,13 +583,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             updatedAt = System.currentTimeMillis()
         )
         if (updated.title.isBlank() || updated.title == Conversation.DEFAULT_TITLE) {
-            updated = updated.copy(title = titleFor(text, images))
+            updated = updated.copy(title = titleFor(snapshot.input, images, snapshot.pendingFiles))
         }
         _state.update {
             it.copy(
                 conversation = updated,
                 input = "",
                 pendingImages = emptyList(),
+                pendingFiles = emptyList(),
                 streamText = "",
                 streamReasoning = "",
                 error = null,
@@ -511,6 +598,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 streaming = true,
                 lastUsage = null
             )
+        }
+        if (composed.dropped.isNotEmpty()) {
+            _state.update {
+                it.copy(
+                    notice = "消息太长（超过 ${TextFiles.sizeLabel(TextFiles.MAX_MESSAGE_BYTES.toLong())}），" +
+                        "只保留了前 ${composed.kept.size} 个文件，其余 ${composed.dropped.size} 个未发送"
+                )
+            }
         }
         inputSession++
         viewModelScope.launch {
@@ -1241,17 +1336,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         return (settings.contextTokens - reserved).coerceAtLeast(2048)
     }
 
-    private fun titleFor(text: String, images: List<ImageRef>): String {
-        val single = text.replace("\n", " ").trim()
+    private fun titleFor(input: String, images: List<ImageRef>, files: List<TextAttachment>): String {
+        val single = input.replace("\n", " ").trim()
         return when {
             single.isNotEmpty() -> if (single.length <= 24) single else single.take(24) + "…"
+            files.isNotEmpty() -> files.first().name.take(24)
             images.isNotEmpty() -> "图片对话"
             else -> Conversation.DEFAULT_TITLE
         }
     }
 
     private companion object {
-        const val MAX_IMAGES = 6
         const val MAX_TOOL_OUTPUT = 8000
 
         /** 流式文本推给 UI 的最小间隔 */

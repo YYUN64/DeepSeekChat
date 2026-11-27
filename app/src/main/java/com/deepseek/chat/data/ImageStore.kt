@@ -135,7 +135,10 @@ class ImageStore(context: Context) {
         }.getOrDefault(bitmap)
     }
 
-    private companion object {
+    companion object {
+        /** 长边缩放上限 */
         const val MAX_EDGE = 1600
+        /** 一条消息最多几张图（多选时也以此为上限） */
+        const val MAX_IMAGES = 6
     }
 }

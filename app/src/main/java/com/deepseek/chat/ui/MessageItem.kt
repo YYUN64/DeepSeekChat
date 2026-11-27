@@ -73,6 +73,14 @@ private fun UserMessage(
     imageLoader: (ImageRef, Int) -> android.graphics.Bitmap?,
     onImageClick: (ImageRef) -> Unit
 ) {
+    // 带文件附件的消息正文可能很长（几十上百 KB）：默认折叠，避免一次排版整段文件内容
+    var expanded by remember(msg.id) { mutableStateOf(false) }
+    val foldable = msg.text.length > USER_FOLD_LIMIT
+    val shownText = if (foldable && !expanded) {
+        msg.text.take(USER_FOLD_LIMIT) + "\n…（还有 ${msg.text.length - USER_FOLD_LIMIT} 字，点「展开全部」查看）"
+    } else {
+        msg.text
+    }
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
         if (msg.images.isNotEmpty()) {
             Row(
@@ -96,7 +104,7 @@ private fun UserMessage(
             ) {
                 SelectionContainer {
                     Text(
-                        text = msg.text,
+                        text = shownText,
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
@@ -104,8 +112,22 @@ private fun UserMessage(
                 }
             }
         }
+        if (foldable) {
+            TextButton(
+                onClick = { expanded = !expanded },
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    text = if (expanded) "收起" else "展开全部",
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
+        }
     }
 }
+
+/** 用户消息超过这个字数就折叠展示（内容本身完整保留在消息里） */
+private const val USER_FOLD_LIMIT = 2000
 
 @Composable
 private fun AssistantMessage(

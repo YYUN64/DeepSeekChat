@@ -4,7 +4,7 @@
 
 一个用 **DeepSeek 官方 API** 驱动的 Android 聊天客户端，界面和交互参照官方 App：极简聊天页 + 历史会话抽屉 + 设置页。
 
-只做四件事：**图片上传、思考深度、会话历史、上下文长度**，其余能省就省。
+只做五件事：**图片上传（可多选）、文本文件、思考深度、会话历史、上下文长度**，其余能省就省。
 
 > 这是第三方客户端，不是官方 App。你的 API Key 只保存在本机。
 >
@@ -16,7 +16,8 @@
 
 | 能力 | 说明 |
 | --- | --- |
-| 图片上传 | 从相册选图，自动缩放（最长边 1600px）并按 EXIF 旋转，以 base64 内联发送；使用 `deepseek-flash` 的原生视觉能力（支持 JPEG/PNG/GIF/WebP） |
+| 图片上传 | 从相册选图（**可一次多选，单条最多 6 张**，超出的丢弃并提示），自动缩放（最长边 1600px）并按 EXIF 旋转，以 base64 内联发送；使用 `deepseek-flash` 的原生视觉能力（支持 JPEG/PNG/GIF/WebP） |
+| 文本文件 | 输入框「+」→「添加文件」，读取 .txt/.md/.json/.csv/.log/.xml/.yaml/代码等文本文件：单文件上限 256 KB（超了截断并标注原大小），最多同时附 5 个、合计 1 MB，整条消息超过 300 KB 时只保留前几个；含 NUL 字节即判定二进制并拒绝，PDF/Word/图片请先转成文本。内容拼进这条消息的文本里，随会话一起持久化（不存二进制） |
 | 联网 | 声明服务端工具 `deepseek_web_search` + `deepseek_read_url`：模型自己决定是否搜索、是否读取消息里的链接，搜索和抓取都在 DeepSeek 服务端完成；回答下方展示「参考来源」。设置里可关闭（默认开），搜索/抓取按次计费 |
 | MCP | 可选（默认关）：设置里填 MCP 服务器 IPv4 + 端口，**默认走 HTTPS**（服务端可用 `--tls-selfsigned` 一键生成 10 年自签证书，不需要域名/证书机构；首次连接弹窗核对证书指纹后信任，指纹变化会拒绝，可在设置里「重置信任」）；「密钥鉴权」用 RSA-2048 请求签名（私钥在 Android Keystore 不可导出，公钥**只在生成时显示一次**、贴到服务端 `authorized_keys`；App 不再保存/发送 token，服务端仍兼容 Bearer token）；App 作为 MCP 客户端把工具交给模型调用，工具真实执行在 MCP 服务器上；工具调用轮数可选 2/4/8/不限（内部上限 64）；支持「测试连接」列出工具名。开启时自动关闭上面的服务端联网工具。配套服务器已拆分为独立仓库 [pocket-mcp](https://github.com/YYUN64/pocket-mcp)：纯标准库单文件 Python，Linux/Windows 均可部署，支持公钥签名鉴权、Bearer token（legacy）与 TLS |
 | 思考深度 | 四档「推理等级」：关闭 / 低 / 高 / 极致（与 DeepSeek Harness 的 off/low/high/max 一致）；思考过程以可折叠面板展示，流式输出 |
@@ -67,7 +68,7 @@
 
 1. 打开 App → 右上角齿轮 → 填入 API Key（在 [platform.deepseek.com](https://platform.deepseek.com/api_keys) 申请）。
 2. 返回聊天页，直接发消息即可。点顶栏标题可切换本轮对话的模型 / 深度思考 / 思考强度。
-3. 输入框左侧的图片按钮 → 选图 → 发送。
+3. 输入框左侧的「+」→「添加图片」（可一次多选，单条最多 6 张）或「添加文件」（文本类，单条最多 5 个）；发送前缩略图和文件 chip 都能逐个删除。
 4. 左滑或点左上角菜单打开会话历史。
 
 ### 参数映射
@@ -80,6 +81,7 @@
 | 最大回复长度 | `max_tokens`（1 ~ 393216） |
 | 系统提示词 | `messages` 开头的 `system` 消息 |
 | 图片 | 用户消息 `content` 数组里的 `image_url`（`data:image/jpeg;base64,...`，`detail: high`） |
+| 文件附件 | 不发文件上传字段：内容按「【文件：名字】+ ```text 围栏」拼进这条 user 消息的 `content` 文本，多文件依次拼接 |
 | 联网开关 | `tools` 里声明 `deepseek_web_search` / `deepseek_read_url`；带 tools 时历史 assistant 消息会回传 `reasoning_content` 与 `server_tool_calls` |
 
 注意：`deepseek-v4-pro` 不支持图片，带图片的消息会自动改用 `deepseek-flash` 发送（气泡上会标注实际使用的模型）。`deepseek-flash` 支持 1M 上下文、Vision 与思考模式。
@@ -95,13 +97,15 @@ app/src/main/java/com/deepseek/chat/
 │   ├── ChatStore.kt             # 会话 JSON 持久化
 │   ├── TokenCounter.kt          # token 估算与上下文裁剪
 │   ├── ImageStore.kt            # 图片缩放/旋转/压缩/base64
+│   ├── TextFiles.kt             # 文本附件：类型/NUL/截断/数量上限/消息拼接（纯逻辑，可单测）
+│   ├── AttachmentStore.kt       # SAF（OpenDocument）读取文本文件
 │   └── DeepSeekClient.kt        # SSE 流式请求 + 错误处理
 └── ui/
     ├── ChatViewModel.kt         # 状态与业务编排
-    ├── App.kt                   # 抽屉 + 页面切换 + 相册选择
+    ├── App.kt                   # 抽屉 + 页面切换 + 相册/文件选择
     ├── ChatScreen.kt            # 聊天页（顶栏、列表、空状态、对话设置）
     ├── MessageItem.kt           # 用户气泡 / 助手消息 / 思考面板
-    ├── Composer.kt              # 输入框、图片条、发送/停止
+    ├── Composer.kt              # 输入框、「+」菜单、图片条、文件 chip、发送/停止
     ├── Markdown.kt              # 轻量 Markdown 解析与渲染
     ├── HistoryDrawer.kt         # 会话历史抽屉
     ├── SettingsScreen.kt        # 设置页
@@ -112,6 +116,7 @@ app/src/main/java/com/deepseek/chat/
 ## 说明
 
 - 数据全部在本机：设置存在 SharedPreferences，会话在 `files/chat/conversations/*.json`，图片在 `files/images/`。
+- 文本文件附件不落盘：发送时内容就是这条消息文本的一部分（会话 JSON 里看到的就是那段文字），所以历史里仍然能看到、也能被「复制内容」导出；PDF/Word/Excel 需要额外解析库，暂不支持，请先转成文本。
 - 卸载 App 会一并删除这些数据；`allowBackup=false`，不会进云备份。
 - 思考模式下 `temperature` / `top_p` 基本无效（DeepSeek 的限制），所以没有做这两个滑杆。
 - 上下文用量：优先用服务端最近一次返回的 `usage` 做锚点（`prompt + completion` 即该轮完整 token），锚点之后新增的消息才用启发式估算补齐；还没有实测数据时整体走估算，此时界面显示 `≈`。启发式为中文按 1 字 ≈ 1 token、其它 4 字符 ≈ 1 token、每张图 1024 token，与真实计费有偏差，以回答下方的服务端 usage 为准。
