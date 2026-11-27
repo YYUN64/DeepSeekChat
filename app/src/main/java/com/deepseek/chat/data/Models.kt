@@ -139,6 +139,9 @@ object Models {
 
     /** 服务端联网工具（deepseek_web_search 等）目前只有 Flash 支持 */
     fun supportsWebTools(model: String): Boolean = model == FLASH
+
+    /** latest_reminder 注入只有 Flash 支持（V4 Pro 会 400） */
+    fun supportsLatestReminder(model: String): Boolean = model == FLASH
 }
 
 /**

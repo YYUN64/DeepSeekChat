@@ -207,8 +207,9 @@ class DeepSeekClient(private val images: ImageStore) {
         // 带 tools 时历史里的 reasoning_content 必须回传
         val echoTools = clientTools != null || settings.webTools
         for (msg in payloadMessages(history)) {
-            // 每条 user 消息前带一条 latest_reminder：模型每轮都知道今天几号（且不破坏缓存）
-            if (msg.role == Role.USER) {
+            // 每条 user 消息前带一条 latest_reminder：模型每轮都知道今天几号（且不破坏缓存）。
+            // 注意：V4 Pro 不支持 latest_reminder（会 400），这种模型直接跳过。
+            if (msg.role == Role.USER && Models.supportsLatestReminder(model)) {
                 messages.put(
                     JSONObject()
                         .put("role", "latest_reminder")

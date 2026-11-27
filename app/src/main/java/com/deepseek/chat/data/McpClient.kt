@@ -29,8 +29,8 @@ class McpClient(
     private val pinnedFingerprint: String = "",
     /** 有 Keystore 密钥时用签名鉴权；没有密钥则请求不带鉴权（服务端未配置鉴权时才可用） */
     private val context: android.content.Context? = null,
-    /** 连接/读取超时（毫秒）：测试连接用 3000，工具执行用 45000 */
-    private val requestTimeoutMs: Int = 45_000
+    /** 连接/读取超时（毫秒）：测试连接用 3000，工具执行用 130000（大于服务端 120 秒上限，让服务端先超时） */
+    private val requestTimeoutMs: Int = 130_000
 ) {
 
     private val endpoint: String = McpEndpoint.url(host, port, https)

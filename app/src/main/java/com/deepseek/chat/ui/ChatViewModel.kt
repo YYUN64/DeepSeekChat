@@ -787,7 +787,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                                 text = if (failed) "" else summarize(output, 400),
                                 error = when {
                                     !failed -> null
-                                    timedOut -> "执行超时（45 秒）：$name"
+                                    timedOut -> "执行超时：$name"
                                     interrupted -> "连接中断：$name"
                                     else -> "调用失败：$name：${summarize(output, 180)}"
                                 },
@@ -799,7 +799,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             )
                         }
                         val toolResult = if (timedOut) {
-                            "工具执行超时（45 秒），已终止：$name"
+                            "工具执行超时，已终止：$name"
                         } else if (interrupted) {
                             "工具执行失败（MCP 连接中断）：$name：${summarize(output, 200)}"
                         } else {
