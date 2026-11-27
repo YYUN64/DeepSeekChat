@@ -128,6 +128,7 @@ fun DeepSeekApp(state: ChatUiState, vm: ChatViewModel) {
             onPickFile = { filePicker.launch(arrayOf("*/*")) },
             onRemoveImage = { ref -> vm.removeImage(ref) },
             onRemoveFile = { index -> vm.removeFile(index) },
+            onCancelQueued = { id -> vm.cancelQueued(id) },
             onRegenerate = { vm.regenerate() },
             onDismissError = { vm.clearError() },
             onClearNotice = { vm.clearNotice() },

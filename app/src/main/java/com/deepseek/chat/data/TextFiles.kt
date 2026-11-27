@@ -24,12 +24,23 @@ sealed interface FileReadResult {
 /** 追加附件前的数量/总大小检查 */
 data class LimitCheck(val allowed: Boolean, val reason: String? = null)
 
-/** 拼好的用户消息 + 被丢弃（太长）的附件 */
+/** 拼好的用户消息：正文只放用户打的字，文件内容单独放在 fileBlocks（只发给模型） */
 data class ComposedMessage(
+    /** 用户自己打的字（trim 后） */
     val text: String,
-    val kept: List<TextAttachment>,
-    val dropped: List<TextAttachment>
-)
+    /** 拼好的文件块（`【文件：…】` + ```text 围栏），没有附件时为 null */
+    val fileBlocks: String? = null,
+    val kept: List<TextAttachment> = emptyList(),
+    val dropped: List<TextAttachment> = emptyList()
+) {
+    /** 发给模型的正文：文字 + 文件块（没有文字就只发文件块） */
+    val modelText: String
+        get() = when {
+            fileBlocks.isNullOrBlank() -> text
+            text.isBlank() -> fileBlocks
+            else -> text + "\n\n" + fileBlocks
+        }
+}
 
 object TextFiles {
 
@@ -169,32 +180,53 @@ object TextFiles {
     fun renderBlock(attachment: TextAttachment): String =
         "【文件：${attachment.name}】\n```text\n${attachment.text.trimEnd('\n')}\n```"
 
-    private fun assemble(input: String, files: List<TextAttachment>): String {
-        if (files.isEmpty()) return input
-        val blocks = files.joinToString("\n\n") { renderBlock(it) }
-        return if (input.isBlank()) blocks else "$input\n\n$blocks"
+    /** 把若干个附件拼成文件块（不含用户文字） */
+    fun blocksOf(files: List<TextAttachment>): String =
+        files.joinToString("\n\n") { renderBlock(it) }
+
+    /** 附件 chip 需要的元数据（持久化到消息里，不进内容） */
+    fun attachmentRefs(files: List<TextAttachment>): List<AttachmentRef> =
+        files.map { AttachmentRef(name = it.name, sizeBytes = it.bytes, truncated = it.truncated) }
+
+    /** chip 上那一行字：`notes.md · 50 KB（已截断）` */
+    fun describe(ref: AttachmentRef): String = buildString {
+        append(ref.name)
+        append(" · ")
+        append(sizeLabel(ref.sizeBytes))
+        if (ref.truncated) append("（已截断）")
+    }
+
+    private fun modelText(text: String, blocks: String): String = when {
+        blocks.isBlank() -> text
+        text.isBlank() -> blocks
+        else -> text + "\n\n" + blocks
     }
 
     /**
-     * 把用户输入 + 附件拼成最终消息文本。
+     * 把用户输入 + 附件拼成最终要发出去的消息：text 是用户文字，fileBlocks 是文件块。
      * 超过 [MAX_MESSAGE_BYTES] 时从后往前丢文件，丢掉的部分放在 [ComposedMessage.dropped]。
      */
     fun compose(input: String, files: List<TextAttachment>): ComposedMessage {
         val trimmed = input.trim()
-        if (files.isEmpty()) return ComposedMessage(trimmed, emptyList(), emptyList())
+        if (files.isEmpty()) return ComposedMessage(text = trimmed)
 
         var kept = files
-        var text = assemble(trimmed, kept)
-        while (utf8Length(text) > MAX_MESSAGE_BYTES && kept.size > 1) {
+        var blocks = blocksOf(kept)
+        while (utf8Length(modelText(trimmed, blocks)) > MAX_MESSAGE_BYTES && kept.size > 1) {
             kept = kept.dropLast(1)
-            text = assemble(trimmed, kept)
+            blocks = blocksOf(kept)
         }
-        if (utf8Length(text) > MAX_MESSAGE_BYTES && kept.size == 1) {
+        if (utf8Length(modelText(trimmed, blocks)) > MAX_MESSAGE_BYTES && kept.size == 1) {
             // 单个文件 + 用户输入仍然超限：保用户输入，丢掉这个文件
             kept = emptyList()
-            text = trimmed
+            blocks = ""
         }
         val dropped = files.drop(kept.size).toList()
-        return ComposedMessage(text, kept.toList(), dropped)
+        return ComposedMessage(
+            text = trimmed,
+            fileBlocks = blocks.ifBlank { null },
+            kept = kept.toList(),
+            dropped = dropped
+        )
     }
 }

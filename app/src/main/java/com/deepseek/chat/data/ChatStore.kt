@@ -108,6 +108,16 @@ class ChatStore(root: File) {
                     .put("height", image.height)
             )
         }
+        // 文本附件：只存元数据（文件名/大小/是否截断）+ 拼好的文件块文本，绝不存二进制
+        val attachments = JSONArray()
+        for (item in msg.attachments) {
+            attachments.put(
+                JSONObject()
+                    .put("name", item.name)
+                    .put("sizeBytes", item.sizeBytes)
+                    .put("truncated", item.truncated)
+            )
+        }
         val json = JSONObject()
             .put("id", msg.id)
             .put("role", msg.role.wire)
@@ -115,6 +125,8 @@ class ChatStore(root: File) {
             .put("reasoning", msg.reasoning)
             .put("createdAt", msg.createdAt)
             .put("images", images)
+            .put("attachments", attachments)
+        if (!msg.fileBlocks.isNullOrBlank()) json.put("fileBlocks", msg.fileBlocks)
         if (msg.error != null) json.put("error", msg.error)
         if (msg.model != null) json.put("model", msg.model)
         if (msg.serverToolCalls != null) json.put("serverToolCalls", msg.serverToolCalls)
@@ -161,6 +173,24 @@ class ChatStore(root: File) {
                 }
             }
         }
+        // 文本附件元数据（老会话没有这个字段 → 空列表，text 里的内联内容保持原样）
+        val attachments = ArrayList<AttachmentRef>()
+        val attachmentArray = json.optJSONArray("attachments")
+        if (attachmentArray != null) {
+            for (i in 0 until attachmentArray.length()) {
+                val item = attachmentArray.optJSONObject(i) ?: continue
+                val name = item.optString("name")
+                if (name.isNotBlank()) {
+                    attachments.add(
+                        AttachmentRef(
+                            name = name,
+                            sizeBytes = item.optLong("sizeBytes", 0L),
+                            truncated = item.optBoolean("truncated", false)
+                        )
+                    )
+                }
+            }
+        }
         var usage: Usage? = null
         val usageJson = json.optJSONObject("usage")
         if (usageJson != null) {
@@ -177,6 +207,8 @@ class ChatStore(root: File) {
             text = json.optString("text"),
             reasoning = json.optString("reasoning"),
             images = images,
+            attachments = attachments,
+            fileBlocks = json.optString("fileBlocks").takeIf { it.isNotBlank() },
             createdAt = json.optLong("createdAt", 0L),
             usage = usage,
             error = json.optString("error").takeIf { it.isNotBlank() },

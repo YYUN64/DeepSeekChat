@@ -266,6 +266,8 @@ class DeepSeekClient(private val images: ImageStore) {
         imageBudget: LongArray
     ): JSONObject {
         val json = JSONObject().put("role", msg.role.wire)
+        // user 消息真正发给模型的正文：用户打的字 + 文件块（老消息没有 fileBlocks，就是 text）
+        val content = payloadContent(msg)
         if (msg.role == Role.TOOL) {
             // 工具执行结果（MCP 场景用）
             return json.put("tool_call_id", msg.toolCallId ?: "").put("content", msg.text)
@@ -286,8 +288,8 @@ class DeepSeekClient(private val images: ImageStore) {
         }
         if (msg.role == Role.USER && msg.images.isNotEmpty() && supportsVision) {
             val parts = JSONArray()
-            if (msg.text.isNotBlank()) {
-                parts.put(JSONObject().put("type", "text").put("text", msg.text))
+            if (content.isNotBlank()) {
+                parts.put(JSONObject().put("type", "text").put("text", content))
             }
             for (image in msg.images) {
                 val size = runCatching { images.file(image).length() }.getOrDefault(0L)
@@ -301,7 +303,7 @@ class DeepSeekClient(private val images: ImageStore) {
                 )
             }
             if (parts.length() == 0) {
-                json.put("content", msg.text)
+                json.put("content", content)
             } else {
                 json.put("content", parts)
             }
@@ -309,10 +311,10 @@ class DeepSeekClient(private val images: ImageStore) {
             // 模型不支持看图：保留文字，图片用占位符说明（空 content 会被接口拒绝）
             json.put(
                 "content",
-                if (msg.text.isBlank()) "[图片已省略]" else msg.text + "\n\n[图片已省略]"
+                if (content.isBlank()) "[图片已省略]" else content + "\n\n[图片已省略]"
             )
         } else {
-            json.put("content", msg.text)
+            json.put("content", content)
         }
         return json
     }
@@ -375,6 +377,10 @@ class DeepSeekClient(private val images: ImageStore) {
 
     internal companion object {
         const val MAX_IMAGE_BYTES = 4L * 1024 * 1024
+
+        /** 真正发给模型的正文：user = 文字 + 文件块，其它角色就是 text */
+        internal fun payloadContent(msg: Msg): String =
+            if (msg.role == Role.USER) msg.modelText else msg.text
 
         /** 真正发给模型的消息序列：跳过 UI 专用的 TOOL_STEP，保留 assistant(tool_calls) 与配对的 tool */
         internal fun payloadMessages(messages: List<Msg>): List<Msg> = messages.filterNot { msg ->

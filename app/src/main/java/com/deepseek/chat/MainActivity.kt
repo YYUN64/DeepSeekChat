@@ -23,7 +23,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.deepseek.chat.data.ThemeMode
 import com.deepseek.chat.ui.ChatViewModel
 import com.deepseek.chat.ui.DeepSeekApp
@@ -38,7 +37,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         requestNotificationPermissionIfNeeded()
         setContent {
-            val vm: ChatViewModel = viewModel()
+            // 应用级单例：Activity 被回收/重建后仍是同一个 ViewModel，
+            // 进行中的生成和界面状态都不会丢（见 ChatEngine）
+            val vm: ChatViewModel = ChatEngine.viewModel(application)
             val state by vm.state.collectAsStateWithLifecycle()
 
             // 退到后台/退出前把还在流式输出的思考过程留一份到磁盘：

@@ -1,7 +1,9 @@
 package com.deepseek.chat.data
 
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -103,6 +105,63 @@ class ChatStoreTest {
         assertEquals(listOf("u1", "a1", "u2"), loaded.messages.map { it.id })
         assertTrue(loaded.messages[1].reasoning.isEmpty())
         assertNull(loaded.messages[1].error)
+    }
+
+    @Test
+    fun `attachments and file blocks survive a round trip`() {
+        val store = store()
+        val blocks = "【文件：notes.md】\n```text\nThe secret code is BLUE-WHALE-42\n```"
+        val conversation = Conversation(
+            id = "conv-files",
+            title = "看看文件",
+            messages = listOf(
+                Msg(
+                    id = "u1",
+                    role = Role.USER,
+                    text = "看看这个",
+                    attachments = listOf(
+                        AttachmentRef("notes.md", 51200L),
+                        AttachmentRef("big.txt", 512000L, truncated = true)
+                    ),
+                    fileBlocks = blocks
+                )
+            )
+        )
+
+        store.save(conversation)
+        val msg = store.load("conv-files")!!.messages[0]
+
+        assertEquals("看看这个", msg.text)
+        assertEquals(blocks, msg.fileBlocks)
+        assertEquals(2, msg.attachments.size)
+        assertEquals("notes.md", msg.attachments[0].name)
+        assertEquals(51200L, msg.attachments[0].sizeBytes)
+        assertFalse(msg.attachments[0].truncated)
+        assertTrue(msg.attachments[1].truncated)
+        // 文件内容只在 fileBlocks 里，不会再被塞回气泡正文
+        assertFalse(msg.text.contains("BLUE-WHALE-42"))
+        assertTrue(msg.modelText.contains("BLUE-WHALE-42"))
+    }
+
+    @Test
+    fun `old conversation json without attachments loads unchanged`() {
+        // 1.9.0 存下来的会话：没有 attachments / fileBlocks 字段，文件内容直接内联在 text 里
+        val dir = File(root, "conversations").apply { mkdirs() }
+        val inline = "看看这个\n\n【文件：notes.md】\n```text\nBLUE-WHALE-42\n```"
+        val raw = """
+            {"id":"conv-old","title":"旧会话","createdAt":1,"updatedAt":2,"model":"deepseek-flash",
+             "thinking":true,"effort":"high",
+             "messages":[{"id":"u1","role":"user","text":${JSONObject.quote(inline)},
+                          "reasoning":"","createdAt":3,"images":[]}]}
+        """.trimIndent()
+        File(dir, "conv-old.json").writeText(raw, Charsets.UTF_8)
+
+        val msg = store().load("conv-old")!!.messages[0]
+        assertEquals(inline, msg.text)
+        assertNull(msg.fileBlocks)
+        assertTrue(msg.attachments.isEmpty())
+        // 老消息发给模型的仍是原文（内容照样能读到）
+        assertEquals(inline, msg.modelText)
     }
 
     @Test

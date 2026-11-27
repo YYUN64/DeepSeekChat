@@ -1,6 +1,7 @@
 package com.deepseek.chat.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -67,9 +68,80 @@ class PayloadTest {
         assertEquals(3, DeepSeekClient.payloadMessages(history).size)
     }
 
+    // ------------------------------------------------------------ 附件 payload
+
+    private val block = "【文件：notes.md】\n```text\nThe secret code is BLUE-WHALE-42\n```"
+
     @Test
-    fun `trim never starts with a dangling tool exchange`() {
+    fun `user content is the typed text followed by the file blocks`() {
+        val msg = Msg(
+            id = "u1",
+            role = Role.USER,
+            text = "看看这个",
+            attachments = listOf(AttachmentRef("notes.md", 51200)),
+            fileBlocks = block
+        )
+        assertEquals("看看这个\n\n$block", DeepSeekClient.payloadContent(msg))
+        // 气泡正文里没有文件内容
+        assertEquals("看看这个", msg.text)
+    }
+
+    @Test
+    fun `file only message sends just the file blocks`() {
+        val msg = Msg(
+            id = "u1",
+            role = Role.USER,
+            attachments = listOf(AttachmentRef("notes.md", 51200)),
+            fileBlocks = block
+        )
+        assertEquals(block, DeepSeekClient.payloadContent(msg))
+    }
+
+    @Test
+    fun `message without attachments is sent as before`() {
+        val msg = Msg(id = "u1", role = Role.USER, text = "普通消息")
+        assertNull(msg.fileBlocks)
+        assertEquals("普通消息", DeepSeekClient.payloadContent(msg))
+    }
+
+    @Test
+    fun `old inline file message is still sent verbatim`() {
+        // 1.9.0 及以前：文件内容直接写在 text 里，没有 fileBlocks
+        val inline = "看看这个\n\n$block"
+        val msg = Msg(id = "u-old", role = Role.USER, text = inline)
+        assertNull(msg.fileBlocks)
+        assertTrue(msg.attachments.isEmpty())
+        assertEquals(inline, DeepSeekClient.payloadContent(msg))
+    }
+
+    @Test
+    fun `assistant content is not touched by file blocks`() {
+        val msg = Msg(id = "a1", role = Role.ASSISTANT, text = "回答", fileBlocks = block)
+        assertEquals("回答", DeepSeekClient.payloadContent(msg))
+    }
+
+    @Test
+    fun `token counter counts the file blocks`() {
+        val blocks = "x".repeat(4000)
+        val plain = Msg(id = "u1", role = Role.USER, text = "你好")
+        val withBlocks = plain.copy(id = "u2", text = "你好", fileBlocks = blocks)
+        val delta = TokenCounter.estimateMessage(withBlocks) - TokenCounter.estimateMessage(plain)
+        assertTrue("fileBlocks 应该计入 token，实际差 $delta", delta >= 900)
+    }
+
+    @Test
+    fun `trim keeps the user message that carries file blocks`() {
         val history = listOf(
+            Msg(id = "u1", role = Role.USER, text = "问", fileBlocks = "y".repeat(2000)),
+            Msg(id = "a1", role = Role.ASSISTANT, text = "答")
+        )
+        val trimmed = TokenCounter.trim(history, budget = 2048)
+        assertEquals(Role.USER, trimmed.first().role)
+        assertTrue(trimmed.first().fileBlocks!!.isNotEmpty())
+    }
+
+    @Test
+    fun `trim never starts with a dangling tool exchange`() {        val history = listOf(
             Msg(id = "u1", role = Role.USER, text = "第一个问题 " + "x".repeat(400)),
             toolCallAssistant(),
             toolMessage("y".repeat(400)),

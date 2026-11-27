@@ -5,6 +5,7 @@ import com.deepseek.chat.data.ToolStatus
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Build
@@ -82,6 +84,24 @@ private fun UserMessage(
         msg.text
     }
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+        if (msg.attachments.isNotEmpty()) {
+            // 附件只显示 chip（文件名 + 大小），文件内容不再铺进气泡
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                for (item in msg.attachments) {
+                    AttachmentChip(
+                        name = item.name,
+                        sizeBytes = item.sizeBytes,
+                        truncated = item.truncated
+                    )
+                }
+            }
+        }
         if (msg.images.isNotEmpty()) {
             Row(
                 modifier = Modifier.padding(bottom = 8.dp),

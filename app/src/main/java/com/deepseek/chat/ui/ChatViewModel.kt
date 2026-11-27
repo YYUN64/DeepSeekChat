@@ -6,12 +6,17 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.deepseek.chat.ChatEngine
 import com.deepseek.chat.ChatService
 import com.deepseek.chat.data.ApiException
 import com.deepseek.chat.data.CertMismatchException
+import com.deepseek.chat.data.AttachmentRef
 import com.deepseek.chat.data.AttachmentStore
+import com.deepseek.chat.data.ComposedMessage
 import com.deepseek.chat.data.ConversationMarkdown
 import com.deepseek.chat.data.FileReadResult
+import com.deepseek.chat.data.MessageQueue
+import com.deepseek.chat.data.QueuedMessage
 import com.deepseek.chat.data.TextAttachment
 import com.deepseek.chat.data.TextFiles
 import com.deepseek.chat.data.McpEndpoint
@@ -59,6 +64,8 @@ data class ChatUiState(
     val pendingImages: List<ImageRef> = emptyList(),
     /** 待发送的文本附件（内容只在内存，发送时拼进消息文本） */
     val pendingFiles: List<TextAttachment> = emptyList(),
+    /** 生成中按发送后排队、等当前生成结束依次自动发送（只在内存，进程被杀即丢） */
+    val queued: List<QueuedMessage> = emptyList(),
     val streaming: Boolean = false,
     val streamText: String = "",
     val streamReasoning: String = "",
@@ -96,6 +103,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
 
+    /** 生成/工具调用跑在应用级 scope（见 ChatEngine），Activity 销毁不会取消 */
+    private val engineScope = ChatEngine.scope
+
+    /** 本轮正在启动（MCP 预检阶段）：避免前台服务被提前收掉 */
+    @Volatile
+    private var roundStarting = false
+
     private var job: Job? = null
 
     /** 本轮正在用的 MCP 客户端（点「停止」时要靠它发取消通知） */
@@ -122,6 +136,46 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 输入会话令牌：发消息之后才导入完成的图片不应再挂到输入框上 */
     private var inputSession = 0
+
+    /** 队列归属的会话 id：切会话必须清空，避免排队消息串到别的会话 */
+    private var queueConversationId = ""
+
+    /** 一条待发送的用户消息（直接发送与排队后自动发送共用同一条流程） */
+    private data class Outgoing(
+        val id: String = UUID.randomUUID().toString(),
+        val text: String = "",
+        val images: List<ImageRef> = emptyList(),
+        val attachments: List<AttachmentRef> = emptyList(),
+        /** 文件块：只发给模型，不进气泡、不进 text */
+        val fileBlocks: String? = null,
+        /** 会话标题提示（用户原始输入） */
+        val titleHint: String = "",
+        /** 因整条消息太长被丢掉的文件数 */
+        val droppedFiles: Int = 0,
+        /** 是否来自排队队列 */
+        val fromQueue: Boolean = false
+    ) {
+        val hasContent: Boolean
+            get() = text.isNotBlank() || images.isNotEmpty() || attachments.isNotEmpty()
+
+        fun toQueued(): QueuedMessage = QueuedMessage(
+            id = id,
+            text = text,
+            images = images,
+            attachments = attachments,
+            fileBlocks = fileBlocks
+        )
+    }
+
+    private fun QueuedMessage.toOutgoing(): Outgoing = Outgoing(
+        id = id,
+        text = text,
+        images = images,
+        attachments = attachments,
+        fileBlocks = fileBlocks,
+        titleHint = text,
+        fromQueue = true
+    )
 
     private val bitmapCache = object : android.util.LruCache<String, Bitmap>(8 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
@@ -262,9 +316,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // ---------------------------------------------------------------- 会话
 
     fun newConversation() {
+        val queuedCount = _state.value.queued.size
         flushPartial()
         stopStreaming()
         inputSession++
+        queueConversationId = ""
         val settings = _state.value.settings
         val conversation = Conversation(
             id = UUID.randomUUID().toString(),
@@ -278,10 +334,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 input = "",
                 pendingImages = emptyList(),
                 pendingFiles = emptyList(),
+                queued = emptyList(),
                 streamText = "",
                 streamReasoning = "",
                 error = null,
-                notice = null
+                notice = if (queuedCount > 0) {
+                    "已新建对话，排队中的 $queuedCount 条已清空"
+                } else {
+                    null
+                }
             )
         }
     }
@@ -347,9 +408,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openConversation(id: String) {
         if (_state.value.conversation?.id == id && !_state.value.streaming) return
+        val queuedCount = _state.value.queued.size
         flushPartial()
         stopStreaming()
         inputSession++
+        queueConversationId = ""
         val conversation = chatStore.load(id)
         if (conversation == null) {
             _state.update { it.copy(error = "会话读取失败") }
@@ -361,10 +424,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 input = "",
                 pendingImages = emptyList(),
                 pendingFiles = emptyList(),
+                queued = emptyList(),
                 streamText = "",
                 streamReasoning = "",
                 error = null,
-                notice = null,
+                notice = if (queuedCount > 0) {
+                    "已切换会话，排队中的 $queuedCount 条已清空"
+                } else {
+                    null
+                },
                 lastUsage = null
             )
         }
@@ -464,20 +532,92 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun send() {
         val snapshot = _state.value
-        if (snapshot.streaming) return
-        val text = snapshot.input.trim()
-        val images = snapshot.pendingImages
-        if (text.isEmpty() && images.isEmpty() && snapshot.pendingFiles.isEmpty()) return
+        val hasContent = snapshot.input.isNotBlank() ||
+            snapshot.pendingImages.isNotEmpty() ||
+            snapshot.pendingFiles.isNotEmpty()
+        if (!hasContent) return
 
         if (!snapshot.settings.hasKey) {
             _state.update { it.copy(showSettings = true, error = "请先在设置里填好 API Key") }
             return
         }
 
-        val settings = snapshot.settings
-        // MCP 开着就必须真的可用：先连一次拿工具，失败或过滤后为空 → 本轮不发送（输入框保留）
-        if (settings.mcpEnabled && settings.mcpHost.isNotBlank() && !bypassMcpOnce) {
-            viewModelScope.launch {
+        // 正在生成：不打断这一轮，把这条排进队列（本轮结束后自动按顺序发出）
+        if (snapshot.streaming) {
+            enqueueCurrent(snapshot)
+            return
+        }
+
+        submit(outgoingFrom(snapshot))
+    }
+
+    /** 把输入框里的这条（连图片/文件一起）放进排队队列，输入框先清空 */
+    private fun enqueueCurrent(snapshot: ChatUiState) {
+        val composed = TextFiles.compose(snapshot.input, snapshot.pendingFiles)
+        val item = QueuedMessage(
+            id = UUID.randomUUID().toString(),
+            text = composed.text,
+            images = snapshot.pendingImages,
+            attachments = TextFiles.attachmentRefs(composed.kept),
+            fileBlocks = composed.fileBlocks
+        )
+        if (item.isEmpty) return
+        queueConversationId = snapshot.conversation?.id.orEmpty()
+        _state.update {
+            it.copy(
+                queued = MessageQueue.enqueue(it.queued, item),
+                input = "",
+                pendingImages = emptyList(),
+                pendingFiles = emptyList(),
+                error = null
+            )
+        }
+        inputSession++
+        if (composed.dropped.isNotEmpty()) {
+            _state.update { it.copy(notice = droppedFilesNotice(composed)) }
+        }
+    }
+
+    /** 取消一条排队消息（不动正在进行的生成） */
+    fun cancelQueued(id: String) {
+        _state.update { it.copy(queued = MessageQueue.cancel(it.queued, id)) }
+    }
+
+    /** 直接发送时用当前输入框内容拼一条 */
+    private fun outgoingFrom(snapshot: ChatUiState): Outgoing {
+        val composed = TextFiles.compose(snapshot.input, snapshot.pendingFiles)
+        return Outgoing(
+            text = composed.text,
+            images = snapshot.pendingImages,
+            attachments = TextFiles.attachmentRefs(composed.kept),
+            fileBlocks = composed.fileBlocks,
+            titleHint = snapshot.input.trim(),
+            droppedFiles = composed.dropped.size
+        )
+    }
+
+    /** 「太长只保留前几个文件」的提示 */
+    private fun droppedFilesNotice(composed: ComposedMessage): String =
+        "消息太长（超过 ${TextFiles.sizeLabel(TextFiles.MAX_MESSAGE_BYTES.toLong())}），" +
+            "只保留了前 ${composed.kept.size} 个文件，其余 ${composed.dropped.size} 个未发送"
+
+    /**
+     * 发送前检查 + 发送（直接发送、排队后自动发送共用）。
+     *
+     * MCP 开着就先真连一次：连不上时直接发送保留输入框、排队消息放回队首，都不丢消息。
+     */
+    private fun submit(outgoing: Outgoing) {
+        if (!outgoing.hasContent) return
+        val settings = _state.value.settings
+        val mcpGate = settings.mcpEnabled && settings.mcpHost.isNotBlank() && !bypassMcpOnce
+        roundStarting = true
+        // 通知从「开始连接 MCP」就亮起来，整轮不断
+        ChatService.start(
+            getApplication(),
+            if (mcpGate) ChatService.PHASE_CONNECTING_MCP else ChatService.PHASE_GENERATING
+        )
+        if (mcpGate) {
+            engineScope.launch {
                 _state.update { it.copy(notice = "正在连接 MCP…") }
                 val prepared = withContext(Dispatchers.IO) {
                     runCatching { prepareMcp(settings, TEST_CONNECT_TIMEOUT_MS) }
@@ -485,11 +625,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 val failure = prepared.exceptionOrNull()
                 when {
                     failure is UntrustedCertException -> {
+                        finishWithoutRound()
+                        requeueIfQueued(outgoing)
                         _state.update {
                             it.copy(notice = null, pendingCertFingerprint = failure.fingerprint, pendingCertRetryChat = true)
                         }
                     }
                     failure is CertMismatchException -> {
+                        finishWithoutRound()
+                        requeueIfQueued(outgoing)
                         _state.update {
                             it.copy(
                                 notice = null,
@@ -499,6 +643,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                     failure != null -> {
+                        finishWithoutRound()
+                        requeueIfQueued(outgoing)
                         _state.update {
                             it.copy(
                                 notice = null,
@@ -511,6 +657,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         val (client, tools) = prepared.getOrThrow()
                         val enabled = McpToolFilter.enabledTools(tools, settings.disabledMcpTools)
                         if (enabled.isEmpty()) {
+                            finishWithoutRound()
+                            requeueIfQueued(outgoing)
                             _state.update {
                                 it.copy(
                                     notice = null,
@@ -521,22 +669,72 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         } else {
                             preparedTools = Pair(client, tools)
                             _state.update { it.copy(notice = null, mcpBypassAvailable = false) }
-                            proceedSend(snapshot)
+                            proceedSend(outgoing)
                         }
                     }
                 }
             }
             return
         }
+        proceedSend(outgoing)
+    }
 
-        proceedSend(snapshot)
+    /** 这一轮没真正开始（发送前检查失败）：复位启动标记，并在真的空闲时收掉通知 */
+    private fun finishWithoutRound() {
+        roundStarting = false
+        stopServiceIfIdle()
+    }
+
+    /** 生成/排队都空了才收前台服务；还有下一轮在启动时不收 */
+    private fun stopServiceIfIdle() {
+        if (roundStarting) return
+        val state = _state.value
+        if (state.streaming || state.queued.isNotEmpty()) return
+        ChatService.stop(getApplication())
+    }
+
+    /** 排队消息因为发送前检查失败没能发出：放回队首，别丢 */
+    private fun requeueIfQueued(outgoing: Outgoing) {
+        if (!outgoing.fromQueue) return
+        _state.update {
+            it.copy(queued = MessageQueue.restoreFirst(it.queued, outgoing.toQueued()))
+        }
+    }
+
+    /** 当前生成结束后调用：自动发出排队里的第一条（顺序发送，直到队列空） */
+    private fun dispatchNextQueued() {
+        val state = _state.value
+        if (state.streaming) return
+        if (state.queued.isEmpty()) return
+        if (queueConversationId.isNotBlank() && queueConversationId != state.conversation?.id) {
+            // 会话已经换了（理论上切会话时已清空，这里兜底，绝不让消息串会话）
+            _state.update {
+                it.copy(queued = emptyList(), notice = "已切换会话，排队中的 ${state.queued.size} 条已清空")
+            }
+            queueConversationId = ""
+            return
+        }
+        val (item, rest) = MessageQueue.takeFirst(state.queued)
+        if (item == null) return
+        _state.update { it.copy(queued = rest) }
+        submit(item.toOutgoing())
     }
 
     /** 仅本轮不带 MCP 工具发送（不写设置、下一轮仍走「MCP 必须在」） */
     fun sendWithoutMcp() {
         bypassMcpOnce = true
         _state.update { it.copy(error = null, mcpBypassAvailable = false) }
-        send()
+        val snapshot = _state.value
+        val hasContent = snapshot.input.isNotBlank() ||
+            snapshot.pendingImages.isNotEmpty() ||
+            snapshot.pendingFiles.isNotEmpty()
+        if (hasContent) {
+            send()
+        } else if (snapshot.queued.isNotEmpty()) {
+            // 被 MCP 拦下的其实是排队消息（输入框是空的）：放回队首的那条重新发
+            dispatchNextQueued()
+        }
+        bypassMcpOnce = false
     }
 
     /** 手动关闭「测试连接」的常驻状态 */
@@ -561,29 +759,33 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun describeMcpError(error: Throwable): String = McpErrors.friendly(error)
 
-    /** 真正把用户消息加入会话并发起请求（send/重试共用） */
-    private fun proceedSend(snapshot: ChatUiState) {
+    /** 真正把这条用户消息加入会话并发起请求（直接发送、排队自动发送、重试共用） */
+    private fun proceedSend(outgoing: Outgoing) {
+        if (!outgoing.hasContent) return
         bypassThisRound = bypassMcpOnce
         bypassMcpOnce = false
-        // 文本附件在这里拼进消息正文（超长时丢尾部的文件）
-        val composed = TextFiles.compose(snapshot.input, snapshot.pendingFiles)
-        val text = composed.text
-        val images = snapshot.pendingImages
-        if (text.isEmpty() && images.isEmpty()) return
 
-        val base = snapshot.conversation ?: ensureConversation()
+        val base = _state.value.conversation ?: ensureConversation()
         val userMsg = Msg(
             id = UUID.randomUUID().toString(),
             role = Role.USER,
-            text = text,
-            images = images
+            text = outgoing.text,
+            images = outgoing.images,
+            attachments = outgoing.attachments,
+            fileBlocks = outgoing.fileBlocks
         )
         var updated = base.copy(
             messages = base.messages + userMsg,
             updatedAt = System.currentTimeMillis()
         )
         if (updated.title.isBlank() || updated.title == Conversation.DEFAULT_TITLE) {
-            updated = updated.copy(title = titleFor(snapshot.input, images, snapshot.pendingFiles))
+            updated = updated.copy(
+                title = titleFor(
+                    outgoing.titleHint.ifBlank { outgoing.text },
+                    outgoing.images,
+                    outgoing.attachments
+                )
+            )
         }
         _state.update {
             it.copy(
@@ -599,11 +801,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 lastUsage = null
             )
         }
-        if (composed.dropped.isNotEmpty()) {
+        if (outgoing.droppedFiles > 0) {
             _state.update {
                 it.copy(
                     notice = "消息太长（超过 ${TextFiles.sizeLabel(TextFiles.MAX_MESSAGE_BYTES.toLong())}），" +
-                        "只保留了前 ${composed.kept.size} 个文件，其余 ${composed.dropped.size} 个未发送"
+                        "只保留了前 ${outgoing.attachments.size} 个文件，其余 ${outgoing.droppedFiles} 个未发送"
                 )
             }
         }
@@ -684,10 +886,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         checkpointId = UUID.randomUUID().toString()
         lastStreamPush = 0L
 
-        // 前台服务：生成期间保持进程优先级（切后台/锁屏/长时间不操作都不至于被系统回收）
-        ChatService.start(getApplication())
+        // 前台服务：整轮（连接 MCP → 生成 → 工具 → 整理）都保持进程优先级
+        roundStarting = false
+        ChatService.start(getApplication(), ChatService.PHASE_GENERATING)
 
-        job = viewModelScope.launch {
+        // 跑在应用级 scope：Activity 被回收 / 最近任务被划掉都不打断这一轮
+        job = engineScope.launch {
             var failure: String? = null
             var usage: Usage? = null
             var citations: String? = null
@@ -758,6 +962,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 while (true) {
                     contentStart = content.length
                     reasoningStart = reasoning.length
+                    // 通知文案跟着阶段走：第一轮是「生成」，工具跑完再回来的那轮是「整理答案」
+                    ChatService.update(
+                        getApplication(),
+                        if (rounds == 0) ChatService.PHASE_GENERATING else ChatService.PHASE_FINISHING
+                    )
                     val result = try {
                         client.streamChat(
                             // V4 Pro 不支持服务端联网工具，带上会被 API 400；本轮自动关掉
@@ -851,6 +1060,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         sawToolRound = true
                         // 底栏状态只是补充，整个工具执行期间都留着，不再设置后立刻清空
                         _state.update { it.copy(toolStatus = "正在调用工具：$name") }
+                        ChatService.update(getApplication(), ChatService.phaseTool(name))
                         var failed = false
                         var failureReason: Throwable? = null
                         var callResult: McpClient.ToolCallResult? = null
@@ -1008,14 +1218,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             withContext(NonCancellable + Dispatchers.IO) { chatStore.save(withAnswer) }
             refreshConversations()
         }
-        // 无论正常结束、失败、超时还是被停止，都收起前台服务通知；
-        // 兜底保证界面不会停在“转圈”：streaming / toolStatus 一定复位
+        // 一轮结束（成功/失败/超时/停止）：复位界面、自动发队首；
+        // 只有真的没有下一轮时（排队被强制刷新等）才收掉前台服务
         job?.invokeOnCompletion {
             activeMcp = null
-            ChatService.stop(getApplication())
             if (myRound == round) {
                 _state.update { it.copy(streaming = false, toolStatus = null) }
+                // 当前生成结束（成功/失败/停止/超时）→ 自动发出排队里的第一条
+                dispatchNextQueued()
             }
+            stopServiceIfIdle()
         }
     }
 
@@ -1134,11 +1346,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
-        // Activity 直接销毁（返回键退出等）时兜底留一份思考过程
+        // 只留一份检查点当兜底：生成协程跑在 ChatEngine 的应用级 scope 上，
+        // 这里**不**取消它（否则划掉最近任务就会把正在执行的 MCP 工具调用丢掉）。
         saveStreamingCheckpoint()
-        client.cancel()
-        job?.cancel()
-        job = null
         super.onCleared()
     }
 
@@ -1255,7 +1465,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 pendingCertRetryChat = false
             )
         }
-        if (retryChat) send() else testMcp()
+        if (retryChat) {
+            val snapshot = _state.value
+            val hasContent = snapshot.input.isNotBlank() ||
+                snapshot.pendingImages.isNotEmpty() ||
+                snapshot.pendingFiles.isNotEmpty()
+            // 被证书拦下的可能是排队消息（输入框是空的）：信任后重发队首
+            if (hasContent) send() else dispatchNextQueued()
+        } else {
+            testMcp()
+        }
     }
 
     /** 清除已信任的证书指纹（下次连接重新走首次确认） */
@@ -1336,11 +1555,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         return (settings.contextTokens - reserved).coerceAtLeast(2048)
     }
 
-    private fun titleFor(input: String, images: List<ImageRef>, files: List<TextAttachment>): String {
+    private fun titleFor(input: String, images: List<ImageRef>, attachments: List<AttachmentRef>): String {
         val single = input.replace("\n", " ").trim()
         return when {
             single.isNotEmpty() -> if (single.length <= 24) single else single.take(24) + "…"
-            files.isNotEmpty() -> files.first().name.take(24)
+            attachments.isNotEmpty() -> attachments.first().name.take(24)
             images.isNotEmpty() -> "图片对话"
             else -> Conversation.DEFAULT_TITLE
         }

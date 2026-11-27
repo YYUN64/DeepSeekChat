@@ -2,6 +2,7 @@ package com.deepseek.chat.data
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -145,7 +146,9 @@ class TextFilesTest {
     @Test
     fun `single file block format`() {
         val composed = TextFiles.compose("", listOf(attachment("notes.md", "# 标题\n内容")))
-        assertEquals("【文件：notes.md】\n```text\n# 标题\n内容\n```", composed.text)
+        assertEquals("【文件：notes.md】\n```text\n# 标题\n内容\n```", composed.fileBlocks)
+        assertEquals("", composed.text)
+        assertEquals(composed.fileBlocks, composed.modelText)
         assertEquals(1, composed.kept.size)
         assertTrue(composed.dropped.isEmpty())
     }
@@ -157,20 +160,21 @@ class TextFilesTest {
             attachment("b.py", "print(1)")
         )
         val composed = TextFiles.compose("看看这两个文件", files)
+        assertEquals("看看这两个文件", composed.text)
         assertEquals(
-            "看看这两个文件\n\n" +
-                "【文件：a.md】\n```text\nAAA\n```\n\n" +
+            "【文件：a.md】\n```text\nAAA\n```\n\n" +
                 "【文件：b.py】\n```text\nprint(1)\n```",
-            composed.text
+            composed.modelText.removePrefix("看看这两个文件\n\n")
         )
         assertEquals(2, composed.kept.size)
-        assertTrue(composed.text.indexOf("【文件：a.md】") < composed.text.indexOf("【文件：b.py】"))
+        assertTrue(composed.modelText.indexOf("【文件：a.md】") < composed.modelText.indexOf("【文件：b.py】"))
     }
 
     @Test
     fun `file only message has no leading blank line`() {
         val composed = TextFiles.compose("   ", listOf(attachment("a.txt", "hi")))
-        assertTrue(composed.text.startsWith("【文件：a.txt】"))
+        assertTrue(composed.modelText.startsWith("【文件：a.txt】"))
+        assertEquals("", composed.text)
     }
 
     @Test
@@ -179,17 +183,34 @@ class TextFilesTest {
         val composed = TextFiles.compose("", files)
         assertEquals(2, composed.kept.size)
         assertEquals(2, composed.dropped.size)
-        assertTrue(TextFiles.utf8Length(composed.text) <= TextFiles.MAX_MESSAGE_BYTES)
+        assertTrue(TextFiles.utf8Length(composed.modelText) <= TextFiles.MAX_MESSAGE_BYTES)
         assertEquals("f1.txt", composed.kept.first().name)
         assertEquals("f4.txt", composed.dropped.last().name)
     }
 
     @Test
-    fun `no files means input only`() {
+    fun `no files means input only and no file blocks`() {
         val composed = TextFiles.compose(" 你好 ", emptyList())
         assertEquals("你好", composed.text)
+        assertNull(composed.fileBlocks)
+        assertEquals("你好", composed.modelText)
         assertTrue(composed.kept.isEmpty())
         assertTrue(composed.dropped.isEmpty())
+    }
+
+    @Test
+    fun `attachment refs carry name size and truncated flag`() {
+        val big = ok(TextFiles.buildAttachment("big.txt", "a".repeat(300 * 1024).toByteArray()))
+        val small = ok(TextFiles.buildAttachment("notes.md", "hi".toByteArray()))
+        val refs = TextFiles.attachmentRefs(listOf(big, small))
+
+        assertEquals(listOf("big.txt", "notes.md"), refs.map { it.name })
+        assertEquals(300L * 1024, refs[0].sizeBytes)
+        assertTrue(refs[0].truncated)
+        assertEquals(2L, refs[1].sizeBytes)
+        assertFalse(refs[1].truncated)
+        assertEquals("big.txt · 300 KB（已截断）", TextFiles.describe(refs[0]))
+        assertEquals("notes.md · 2 B", TextFiles.describe(refs[1]))
     }
 
     // ------------------------------------------------------------ 数量/大小上限

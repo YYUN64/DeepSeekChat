@@ -14,11 +14,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.filled.Stop
@@ -51,8 +51,9 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.deepseek.chat.data.ImageRef
+import com.deepseek.chat.data.MessageQueue
+import com.deepseek.chat.data.QueuedMessage
 import com.deepseek.chat.data.TextAttachment
-import com.deepseek.chat.data.TextFiles
 
 @Composable
 fun Composer(
@@ -60,9 +61,11 @@ fun Composer(
     onInput: (String) -> Unit,
     images: List<ImageRef>,
     files: List<TextAttachment>,
+    queued: List<QueuedMessage>,
     imageLoader: (ImageRef, Int) -> android.graphics.Bitmap?,
     onRemoveImage: (ImageRef) -> Unit,
     onRemoveFile: (Int) -> Unit,
+    onCancelQueued: (String) -> Unit,
     onPickImage: () -> Unit,
     onPickFile: () -> Unit,
     onSend: () -> Unit,
@@ -77,6 +80,22 @@ fun Composer(
             .padding(horizontal = 12.dp)
             .padding(bottom = 8.dp)
     ) {
+        // 生成中按发送的消息排队在这里，等这一轮结束后自动按顺序发出
+        if (queued.isNotEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 132.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(bottom = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                for (item in queued) {
+                    QueuedRow(item = item, onCancel = { onCancelQueued(item.id) })
+                }
+            }
+        }
+
         if (images.isNotEmpty()) {
             Row(
                 modifier = Modifier
@@ -118,7 +137,12 @@ fun Composer(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 for ((index, file) in files.withIndex()) {
-                    FileChip(file = file, onRemove = { onRemoveFile(index) })
+                    AttachmentChip(
+                        name = file.name,
+                        sizeBytes = file.bytes,
+                        truncated = file.truncated,
+                        onRemove = { onRemoveFile(index) }
+                    )
                 }
             }
         }
@@ -168,7 +192,7 @@ fun Composer(
                     .heightIn(min = 52.dp),
                 placeholder = {
                     Text(
-                        text = "给 DeepSeek 发消息…",
+                        text = if (streaming) "生成中，发送会排队…" else "给 DeepSeek 发消息…",
                         style = MaterialTheme.typography.bodyMedium
                     )
                 },
@@ -188,25 +212,54 @@ fun Composer(
                     disabledIndicatorColor = Color.Transparent
                 )
             )
-            Spacer(modifier = Modifier.width(6.dp))
-            FilledIconButton(
-                onClick = if (streaming) onStop else onSend,
-                enabled = streaming || input.isNotBlank() || images.isNotEmpty() || files.isNotEmpty(),
-                modifier = Modifier.size(52.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            ) {
-                if (streaming) {
+            if (streaming) {
+                // 生成中两个按钮并排：左「停止」只停当前生成；右「发送」= 排队，不打断
+                Spacer(modifier = Modifier.width(8.dp))
+                FilledIconButton(
+                    onClick = onStop,
+                    modifier = Modifier.size(52.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                ) {
                     Icon(
                         imageVector = Icons.Filled.Stop,
                         contentDescription = "停止生成",
                         modifier = Modifier.size(20.dp)
                     )
-                } else {
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                FilledIconButton(
+                    onClick = onSend,
+                    enabled = input.isNotBlank() || images.isNotEmpty() || files.isNotEmpty(),
+                    modifier = Modifier.size(52.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Outlined.Send,
+                        contentDescription = "发送",
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            } else {
+                Spacer(modifier = Modifier.width(6.dp))
+                FilledIconButton(
+                    onClick = onSend,
+                    enabled = input.isNotBlank() || images.isNotEmpty() || files.isNotEmpty(),
+                    modifier = Modifier.size(52.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Outlined.Send,
                         contentDescription = "发送",
@@ -215,57 +268,42 @@ fun Composer(
                 }
             }
         }
+        if (streaming) {
+            Text(
+                text = "生成中：发送新消息会排队，等这一轮结束自动发出",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 56.dp, top = 4.dp)
+            )
+        }
         Spacer(modifier = Modifier.height(2.dp))
     }
 }
 
-/** 文件附件 chip：文件名 + 大小，可点 × 移除 */
+/** 一条排队项：`排队中：<前 30 字>…` + 右侧 × 取消 */
 @Composable
-private fun FileChip(file: TextAttachment, onRemove: () -> Unit) {
+private fun QueuedRow(item: QueuedMessage, onCancel: () -> Unit) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.widthIn(max = 220.dp)
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(start = 10.dp, end = 4.dp, top = 6.dp, bottom = 6.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.Description,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(16.dp)
-            )
-            Column(
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = MessageQueue.label(item),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
-                    .weight(1f, fill = false)
-                    .padding(start = 6.dp)
-            ) {
-                Text(
-                    text = file.name,
-                    style = MaterialTheme.typography.labelLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = buildString {
-                        append(TextFiles.sizeLabel(file.bytes))
-                        if (file.truncated) append(" · 已截断")
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1
-                )
-            }
-            IconButton(
-                onClick = onRemove,
-                modifier = Modifier.size(28.dp)
-            ) {
+                    .weight(1f)
+                    .padding(start = 10.dp, top = 4.dp, bottom = 4.dp)
+            )
+            IconButton(onClick = onCancel, modifier = Modifier.size(30.dp)) {
                 Icon(
                     imageVector = Icons.Outlined.Close,
-                    contentDescription = "移除文件",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    contentDescription = "取消排队",
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
                     modifier = Modifier.size(14.dp)
                 )
             }

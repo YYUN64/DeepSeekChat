@@ -35,7 +35,8 @@ object TokenCounter {
         if (msg.role == Role.TOOL) {
             return estimate(msg.text.take(2000)) + 4
         }
-        var tokens = estimate(msg.text) + 4
+        // user 消息真正发出去的是 text + fileBlocks，裁剪预算要按这个算
+        var tokens = estimate(if (msg.role == Role.USER) msg.modelText else msg.text) + 4
         // assistant 的 tool_calls JSON 也会发出去
         if (msg.role == Role.ASSISTANT && !msg.toolCallsJson.isNullOrBlank()) {
             tokens += estimate(msg.toolCallsJson.take(2000))

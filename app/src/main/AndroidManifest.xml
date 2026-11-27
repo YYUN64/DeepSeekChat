@@ -27,10 +27,12 @@
             </intent-filter>
         </activity>
 
+        <!-- stopWithTask=false：最近任务被划掉时不销毁服务，正在执行的工具调用/生成继续跑 -->
         <service
             android:name=".ChatService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="dataSync"
+            android:stopWithTask="false" />
     </application>
 
 </manifest>

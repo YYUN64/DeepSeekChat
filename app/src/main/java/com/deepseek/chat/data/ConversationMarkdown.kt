@@ -32,6 +32,10 @@ object ConversationMarkdown {
         for (image in message.images) {
             if (image.fileName.isNotBlank()) parts.add("[图片]")
         }
+        // 附件只写「名字 + 大小」，不把内容（msg.fileBlocks）导出去
+        for (item in message.attachments) {
+            parts.add("【附件：${item.name}（${TextFiles.sizeLabel(item.sizeBytes)}）】")
+        }
         if (parts.isEmpty()) return null
         return "$label：" + parts.joinToString("\n\n")
     }

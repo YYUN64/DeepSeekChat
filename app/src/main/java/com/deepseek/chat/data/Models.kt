@@ -7,6 +7,16 @@ data class ImageRef(
     val height: Int = 0
 )
 
+/**
+ * 已发送消息里附带的文本文件：只存元数据（文件名/大小/是否截断），
+ * 气泡里渲染成 chip；真正的内容在 [Msg.fileBlocks]。
+ */
+data class AttachmentRef(
+    val name: String,
+    val sizeBytes: Long,
+    val truncated: Boolean = false
+)
+
 enum class Role(val wire: String) {
     SYSTEM("system"),
     USER("user"),
@@ -40,6 +50,13 @@ data class Msg(
     val text: String = "",
     val reasoning: String = "",
     val images: List<ImageRef> = emptyList(),
+    /** 文本文件附件的元数据：只用于气泡渲染与持久化 */
+    val attachments: List<AttachmentRef> = emptyList(),
+    /**
+     * 拼好的文件块（`【文件：…】` + ```text 围栏），**只发给模型**，不参与气泡渲染。
+     * null 表示没有附件；1.9.0 及以前的老消息内容直接写在 text 里，这里为 null。
+     */
+    val fileBlocks: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val usage: Usage? = null,
     val error: String? = null,
@@ -70,7 +87,18 @@ data class Msg(
      * 不算最终答案，也不显示「复制/重试」按钮行。
      */
     val intermediate: Boolean = false
-)
+) {
+    /**
+     * 真正发给模型的 user 正文：用户打的字 + 文件块（没有文字就只发文件块）。
+     * 老消息没有 fileBlocks，内容本来就在 text 里，这里原样返回 text（兼容旧会话）。
+     */
+    val modelText: String
+        get() = when {
+            fileBlocks.isNullOrBlank() -> text
+            text.isBlank() -> fileBlocks
+            else -> text + "\n\n" + fileBlocks
+        }
+}
 
 data class Conversation(
     val id: String,
