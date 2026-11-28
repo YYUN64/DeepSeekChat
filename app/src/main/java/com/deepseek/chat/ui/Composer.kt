@@ -192,7 +192,7 @@ fun Composer(
                     .heightIn(min = 52.dp),
                 placeholder = {
                     Text(
-                        text = if (streaming) "生成中，发送会排队…" else "给 DeepSeek 发消息…",
+                        text = if (streaming) "生成中…" else "给 DeepSeek 发消息…",
                         style = MaterialTheme.typography.bodyMedium
                     )
                 },
@@ -267,14 +267,6 @@ fun Composer(
                     )
                 }
             }
-        }
-        if (streaming) {
-            Text(
-                text = "生成中：发送新消息会排队，等这一轮结束自动发出",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 56.dp, top = 4.dp)
-            )
         }
         Spacer(modifier = Modifier.height(2.dp))
     }

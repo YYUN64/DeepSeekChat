@@ -37,8 +37,10 @@ import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
@@ -351,40 +353,37 @@ fun ChatScreen(
                 }
             }
         }
-            // 上翻阅读时的「回到底部」：覆盖在列表区域右下角（不依赖 bottomBar 重组）。
+            // 上翻阅读时的「回到底部」：40dp 圆形图标按钮，贴在**输入区上方**（让开底栏），
+            // 不和发送键/输入框/键盘打架。显示条件仍是「上翻且正在生成」。
             // 注意：state 是普通参数不是 State，derivedStateOf 捕获它不会随新 state 重算，
             // 所以这里用普通表达式——任何一次重组都会重新求值，最可靠。
             val showBackToBottom = !followBottom && state.streaming
             if (showBackToBottom) {
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    shadowElevation = 6.dp,
+                FilledTonalIconButton(
+                    onClick = {
+                        followBottom = true
+                        frozenStream = null
+                        frozenReasoning = null
+                        scope.launch { listState.scrollToItem(0) }
+                    },
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(end = 16.dp, bottom = 16.dp)
-                        .clickable {
-                            followBottom = true
-                            frozenStream = null
-                            frozenReasoning = null
-                            scope.launch { listState.scrollToItem(0) }
-                        }
+                        // innerPadding.bottom 即输入区（bottomBar）高度：按钮正好落在它上方 12dp
+                        .padding(
+                            bottom = innerPadding.calculateBottomPadding() + 12.dp,
+                            end = 16.dp
+                        )
+                        .size(40.dp),
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.KeyboardArrowDown,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "回到底部",
-                            style = MaterialTheme.typography.labelMedium,
-                            modifier = Modifier.padding(start = 4.dp)
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.Filled.KeyboardArrowDown,
+                        contentDescription = "回到底部",
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
             }
         }
